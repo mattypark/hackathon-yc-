@@ -17,15 +17,32 @@ try {
 
 const MESSAGING_URL = process.env.MESSAGING_URL || "http://localhost:4000";
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
-const FALLBACK = { action: "cut_nontalking", source: "unspecified", marginSec: 0.2 };
 
-const SYSTEM = `You parse video-editing requests from iMessage into JSON. Output ONLY JSON:
-{ "action": "cut_nontalking" | "status" | "review" | "unknown",
+const SYSTEM = `You are jptr, a friendly video-editing agent people text over iMessage.
+Parse each message into JSON. Output ONLY JSON:
+{ "action": "chat" | "cut_nontalking" | "status" | "review",
+  "reply": "short friendly reply, REQUIRED when action is chat",
   "source": "drive" | "uploaded" | "unspecified",
   "marginSec": 0.2 }
-"cut the non-talking parts / dead air / silence" → cut_nontalking.
+Anything about editing/cutting/trimming videos, removing silence/dead air/non-talking
+parts, or their clips/Drive footage → cut_nontalking.
 "how's it going / done yet" → status. "get feedback / have editors look" → review.
-Anything else → unknown.`;
+Everything else (greetings, questions, small talk) → chat, with a warm 1-2 sentence
+"reply" that mentions you can auto-edit videos from their Google Drive if relevant.`;
+
+// No-LLM fallback: keyword routing + canned replies keeps the thread conversational.
+function keywordIntent(text) {
+  const t = (text || "").toLowerCase();
+  if (/\b(status|progress|done yet|how'?s it going)\b/.test(t)) return { action: "status" };
+  if (/\b(review|feedback|human editors?)\b/.test(t)) return { action: "review" };
+  if (/\b(cut|edit|trim|clips?|videos?|footage|silence|dead air|non.?talking|drive)\b/.test(t))
+    return { action: "cut_nontalking", source: "unspecified", marginSec: 0.2 };
+  return {
+    action: "chat",
+    reply:
+      "hey! I'm jptr 🎬 — text me something like \"cut the non-talking parts from my clips\" and I'll grab the footage from your Google Drive, edit it, and send the video back here.",
+  };
+}
 
 const app = express();
 app.use(express.json());
@@ -48,10 +65,11 @@ async function parseIntent(text) {
   try {
     const raw = await llm.complete({ system: SYSTEM, user: text });
     const intent = JSON.parse(raw.replace(/```(json)?/g, "").trim());
-    return intent.action && intent.action !== "unknown" ? intent : FALLBACK;
+    if (!intent.action || intent.action === "unknown") return keywordIntent(text);
+    return intent;
   } catch (e) {
-    console.log("intent parse failed, using fallback:", e.message);
-    return FALLBACK;
+    console.log("intent parse failed, using keyword fallback:", e.message);
+    return keywordIntent(text);
   }
 }
 
@@ -104,6 +122,16 @@ app.post("/handle", async (req, res) => {
   const intent = await parseIntent(text || "");
   console.log("intent →", intent);
 
+  if (intent.action === "chat") {
+    await sendToMessaging({
+      chatId,
+      text:
+        intent.reply ||
+        "hey! I'm jptr 🎬 — I auto-edit videos. Ask me to cut the non-talking parts from your clips.",
+    });
+    return res.json({ ok: true });
+  }
+
   if (intent.action === "status") {
     await sendToMessaging({ chatId, text: "still working on it 🎬" });
     return res.json({ ok: true });
@@ -122,6 +150,11 @@ app.post("/handle", async (req, res) => {
   };
   if (process.env.DRIVE_FOLDER_ID) editRequest.driveFolderId = process.env.DRIVE_FOLDER_ID;
   res.json({ ok: true, accepted: true });
+  // Ack immediately so the thread isn't silent while the edit runs.
+  sendToMessaging({
+    chatId,
+    text: "on it 🎬 — checking your Google Drive for new clips and cutting the dead air. I'll text the finished video here.",
+  }).catch(console.error);
   runEdit(chatId, editRequest);
 });
 
