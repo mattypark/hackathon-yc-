@@ -117,7 +117,7 @@ async function launchReview({ videoPath, chatId }) {
     });
     oppId = opp.id || (opp.data && opp.data.id);
     console.log("[terac] opportunity created", oppId);
-    await terac(`/opportunities/${oppId}/launch`, { method: "POST" });
+    await terac(`/opportunities/${oppId}/launch`, { method: "POST", body: "{}" });
     console.log("[terac] opportunity LAUNCHED", oppId, "->", taskUrl);
   }
 
