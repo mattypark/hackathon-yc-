@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>jptr — Video editing over iMessage</title>
+<meta name="description" content="Text your clips. Get a finished cut back in the same iMessage thread. No apps, no timelines, no uploads." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Colors */
+    --color-obsidian: #09090b;
+    --color-graphite: #18181b;
+    --color-slate: #27272a;
+    --color-iron: #3f3f46;
+    --color-steel: #52525b;
+    --color-fog: #71717a;
+    --color-ash: #a1a1aa;
+    --color-mist: #d4d4d8;
+    --color-cloud: #ececee;
+    --color-paper: #f4f4f5;
+    --color-snow: #ffffff;
+    --color-ember: #ff5a00;
+    --color-magenta-spark: #fe45e2;
+
+    --font-cosmica: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    --page-max-width: 1200px;
+    --section-gap: 80px;
+    --card-padding: 28px;
+
+    --radius-cards: 36px;
+    --radius-pills: 10000px;
+    --radius-badges: 12px;
+    --radius-inputs: 14px;
+    --radius-buttons: 14px;
+
+    --shadow-cta: rgba(255, 255, 255, 0.5) 0px 0.5px 0px 0px inset, rgba(117, 123, 133, 0.4) 0px 9px 14px -5px inset, rgb(44, 46, 52) 0px 0px 0px 1.5px, rgba(0, 0, 0, 0.14) 0px 4px 6px 0px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--font-cosmica);
+    background: var(--color-paper);
+    color: var(--color-graphite);
+    font-size: 15px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container {
+    max-width: var(--page-max-width);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  section { padding: var(--section-gap) 0 0; }
+
+  /* ============ Navigation ============ */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(244, 244, 245, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 68px;
+  }
+  .logo {
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--color-obsidian);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 9px;
+    background: var(--color-obsidian);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .nav-links {
+    display: flex;
+    gap: 28px;
+  }
+  .nav-links a {
+    font-size: 14px;
+    color: var(--color-graphite);
+    text-decoration: none;
+  }
+  .nav-links a:hover { color: var(--color-obsidian); }
+  .nav-actions { display: flex; align-items: center; gap: 12px; }
+  .nav-login {
+    font-size: 14px;
+    color: var(--color-iron);
+    text-decoration: none;
+    padding: 10px 14px;
+  }
+  .btn-dark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-obsidian);
+    color: #ffffff;
+    font-family: var(--font-cosmica);
+    font-size: 14px;
+    font-weight: 400;
+    padding: 12px 16px;
+    border: none;
+    border-radius: var(--radius-buttons);
+    box-shadow: var(--shadow-cta);
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: transform 0.15s ease;
+  }
+  .btn-dark:hover { transform: translateY(-1px); }
+  .nav .btn-dark { border-radius: var(--radius-pills); padding: 10px 18px; }
+
+  /* ============ Hero ============ */
+  .hero { padding: 80px 0; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 48px;
+    align-items: center;
+  }
+  .badge-ember {
+    display: inline-block;
+    background: var(--color-ember);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: var(--radius-badges);
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 64px;
+    font-weight: 600;
+    line-height: 1.12;
+    color: var(--color-obsidian);
+    letter-spacing: -0.02em;
+  }
+  .rotator {
+    display: inline-block;
+    position: relative;
+    color: var(--color-obsidian);
+    border-bottom: 3px solid var(--color-cloud);
+    min-width: 220px;
+  }
+  .rotator span {
+    position: absolute;
+    left: 0;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    white-space: nowrap;
+  }
+  .rotator span.active {
+    position: relative;
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .hero-side p {
+    font-size: 15px;
+    color: var(--color-steel);
+    margin-bottom: 24px;
+  }
+  .email-capture {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .email-capture input {
+    flex: 1;
+    background: var(--color-snow);
+    border: 1px solid transparent;
+    border-radius: var(--radius-inputs);
+    padding: 12px 16px;
+    font-family: var(--font-cosmica);
+    font-size: 14px;
+    color: #333333;
+    outline: none;
+  }
+  .email-capture input::placeholder { color: var(--color-ash); }
+  .email-capture input:focus { border-color: var(--color-mist); }
+  .capture-note {
+    font-size: 12px;
+    line-height: 1.64;
+    color: var(--color-fog);
+  }
+
+  /* ============ Logo strip ============ */
+  .logo-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 40px 0 0;
+  }
+  .logo-strip span {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-fog);
+    opacity: 0.65;
+    letter-spacing: 0.01em;
+  }
+  .strip-label {
+    text-align: center;
+    font-size: 12px;
+    color: var(--color-ash);
+    margin-top: 48px;
+  }
+
+  /* ============ Section headings ============ */
+  .section-head {
+    max-width: 720px;
+    margin-bottom: 40px;
+  }
+  .section-head h2 {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.28;
+    color: var(--color-obsidian);
+    letter-spacing: -0.01em;
+    margin-bottom: 12px;
+  }
+  .section-head p { font-size: 15px; color: var(--color-steel); }
+
+  /* ============ Category cards (iMessage mockups) ============ */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .cat-card {
+    background: var(--color-snow);
+    border: 1px solid var(--color-cloud);
+    border-radius: var(--radius-cards);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .cat-card .thread {
+    background: var(--color-paper);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 190px;
+    border-bottom: 1px solid var(--color-cloud);
+  }
+  .bubble {
+    max-width: 85%;
+    padding: 9px 13px;
+    border-radius: 18px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .bubble.sent {
+    align-self: flex-end;
+    background: var(--color-obsidian);
+    color: #ffffff;
+    border-bottom-right-radius: 6px;
+  }
+  .bubble.recv {
+    align-self: flex-start;
+    background: var(--color-cloud);
+    color: var(--color-graphite);
+    border-bottom-left-radius: 6px;
+  }
+  .bubble.video {
+    align-self: flex-start;
+    background: var(--color-slate);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+  }
+  .bubble.video::before {
+    content: "▶";
+    font-size: 10px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .cat-card .card-body { padding: 20px var(--card-padding) var(--card-padding); }
+  .cat-card h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-obsidian);
+    margin-bottom: 12px;
+  }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag {
+    font-size: 12px;
+    color: var(--color-graphite);
+    border: 1px solid var(--color-cloud);
+    border-radius: var(--radius-badges);
+    padding: 4px 8px;
+  }
+  .tag.filled {
+    background: var(--color-iron);
+    color: #fafafa;
+    border-color: var(--color-iron);
+  }
+
+  /* ============ Dark feature block ============ */
+  .dark-block {
+    background: var(--color-slate);
+    border-radius: var(--radius-cards);
+    padding: 48px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+  .dark-block h2 {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #ffffff;
+    margin-bottom: 16px;
+  }
+  .dark-block .sub { font-size: 15px; color: var(--color-ash); }
+  .pain-list { list-style: none; display: flex; flex-direction: column; }
+  .pain-list li {
+    font-size: 20px;
+    font-weight: 500;
+    color: #ffffff;
+    padding: 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .pain-list li:last-child { border-bottom: none; }
+  .pain-list li::before {
+    content: "→";
+    color: var(--color-ash);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  /* ============ How it works ============ */
+  .steps-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .step-card {
+    background: var(--color-snow);
+    border: 1px solid var(--color-cloud);
+    border-radius: var(--radius-cards);
+    padding: var(--card-padding);
+  }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    background: var(--color-paper);
+    border: 1px solid var(--color-cloud);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-obsidian);
+    margin-bottom: 20px;
+  }
+  .step-card h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-obsidian);
+    margin-bottom: 8px;
+  }
+  .step-card p { font-size: 14px; color: var(--color-steel); }
+
+  /* ============ Stats row ============ */
+  .stats-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 32px;
+    flex-wrap: wrap;
+    padding: 48px;
+    background: var(--color-snow);
+    border: 1px solid var(--color-cloud);
+    border-radius: var(--radius-cards);
+  }
+  .stat { display: flex; align-items: baseline; gap: 12px; }
+  .stat .num {
+    font-size: 56px;
+    font-weight: 600;
+    color: var(--color-obsidian);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .stat .label {
+    font-size: 14px;
+    color: var(--color-steel);
+    max-width: 140px;
+  }
+
+  /* ============ Breakthrough divider ============ */
+  .breakthrough {
+    height: 320px;
+    border-radius: 64px 64px 0 0;
+    background:
+      radial-gradient(ellipse 80% 90% at 20% 110%, rgba(254, 69, 226, 0.18), transparent 60%),
+      radial-gradient(ellipse 70% 80% at 85% 120%, rgba(255, 90, 0, 0.14), transparent 55%),
+      linear-gradient(180deg, var(--color-cloud) 0%, var(--color-mist) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .breakthrough .big-bubble {
+    background: var(--color-obsidian);
+    color: #ffffff;
+    font-size: 20px;
+    font-weight: 500;
+    padding: 18px 28px;
+    border-radius: 28px;
+    border-bottom-right-radius: 8px;
+    box-shadow: var(--shadow-cta);
+  }
+
+  /* ============ Testimonials ============ */
+  .quote-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .quote-card {
+    background: var(--color-snow);
+    border: 1px solid var(--color-cloud);
+    border-radius: var(--radius-cards);
+    padding: var(--card-padding);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .quote-card blockquote {
+    font-size: 18px;
+    line-height: 1.45;
+    color: var(--color-graphite);
+    font-weight: 500;
+  }
+  .quote-meta { display: flex; align-items: center; gap: 12px; }
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--color-cloud);
+    color: var(--color-iron);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .quote-meta .who { font-size: 14px; font-weight: 600; color: var(--color-obsidian); }
+  .quote-meta .role { font-size: 12px; color: var(--color-fog); }
+
+  /* ============ Final CTA ============ */
+  .final-cta {
+    background: var(--color-graphite);
+    border-radius: var(--radius-cards);
+    padding: 64px 48px;
+    text-align: center;
+  }
+  .final-cta h2 {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.28;
+    color: #ffffff;
+    margin-bottom: 12px;
+    letter-spacing: -0.01em;
+  }
+  .final-cta p { font-size: 15px; color: var(--color-ash); margin-bottom: 28px; }
+  .final-cta .email-capture {
+    max-width: 440px;
+    margin: 0 auto;
+  }
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    color: var(--color-iron);
+    border: 1px solid var(--color-iron);
+    font-family: var(--font-cosmica);
+    font-size: 14px;
+    padding: 12px 20px;
+    border-radius: var(--radius-pills);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  /* ============ Footer ============ */
+  footer {
+    margin-top: var(--section-gap);
+    border-top: 1px solid var(--color-cloud);
+    padding: 40px 0 48px;
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .footer-links { display: flex; gap: 24px; }
+  .footer-links a {
+    font-size: 13px;
+    color: var(--color-fog);
+    text-decoration: none;
+  }
+  .footer-links a:hover { color: var(--color-graphite); }
+  .footer-note { font-size: 12px; color: var(--color-ash); }
+
+  /* ============ Responsive ============ */
+  @media (max-width: 960px) {
+    .hero h1 { font-size: 48px; }
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .card-grid { grid-template-columns: repeat(2, 1fr); }
+    .dark-block { grid-template-columns: 1fr; padding: 32px; }
+    .steps-grid, .quote-grid { grid-template-columns: 1fr; }
+    .stats-row { flex-direction: column; }
+  }
+  @media (max-width: 560px) {
+    .hero h1 { font-size: 38px; }
+    .rotator { min-width: 150px; }
+    .card-grid { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="logo" href="#"><span class="logo-mark">j</span>jptr</a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#reviews">Reviews</a>
+      <a href="#start">Get started</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-login" href="#">Log in</a>
+      <a class="btn-dark" href="#get-started">Get your number</a>
+    </div>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero" id="get-started">
+  <div class="container hero-grid">
+    <div>
+      <span class="badge-ember">YC-style hackathon build</span>
+      <h1>Your video editor is now just a
+        <span class="rotator" id="rotator">
+          <span class="active">text away.</span>
+          <span>rough cut.</span>
+          <span>reply.</span>
+          <span>thread.</span>
+        </span>
+      </h1>
+    </div>
+    <div class="hero-side">
+      <p>iMessage is already the easiest way you communicate — so that's where your editor lives. Text jptr your clips, describe the cut you want, and the finished video lands back in the same thread. Reviewed by real human editors. No apps, no timelines, no uploads.</p>
+      <form class="email-capture" onsubmit="event.preventDefault(); this.querySelector('input').value=''; alert('You\'re on the list — we\'ll text you.');">
+        <input type="email" placeholder="Enter your email" required />
+        <button class="btn-dark" type="submit">Get early access</button>
+      </form>
+      <p class="capture-note">We'll text you a number to start your first edit. Free during beta.</p>
+    </div>
+  </div>
+  <div class="container">
+    <p class="strip-label">Powered by the stack behind the scenes</p>
+    <div class="logo-strip">
+      <span>iMessage</span>
+      <span>Claude</span>
+      <span>Google Drive</span>
+      <span>Linq</span>
+      <span>Terac</span>
+    </div>
+  </div>
+</section>
+
+<!-- Category cards -->
+<section id="features">
+  <div class="container">
+    <div class="section-head">
+      <h2>Everything happens in one thread.</h2>
+      <p>The whole edit — request, delivery, and human review — lives in the same iMessage conversation you already use every day.</p>
+    </div>
+    <div class="card-grid">
+      <div class="cat-card">
+        <div class="thread">
+          <div class="bubble sent">I have 4 clips from the salon yesterday — cut out all the non-talking parts</div>
+          <div class="bubble recv">On it. Pulling clips from your Drive now.</div>
+        </div>
+        <div class="card-body">
+          <h3>Ask in plain English</h3>
+          <div class="tag-row">
+            <span class="tag">Natural language</span>
+            <span class="tag">No timeline</span>
+          </div>
+        </div>
+      </div>
+      <div class="cat-card">
+        <div class="thread">
+          <div class="bubble recv">Found 4 clips in your shared folder. Cutting silence and stitching them together…</div>
+          <div class="bubble recv">Done — 12s of footage down to a tight 7s cut.</div>
+        </div>
+        <div class="card-body">
+          <h3>Clips pulled automatically</h3>
+          <div class="tag-row">
+            <span class="tag">Google Drive</span>
+            <span class="tag">Drag &amp; drop</span>
+          </div>
+        </div>
+      </div>
+      <div class="cat-card">
+        <div class="thread">
+          <div class="bubble video">final.mp4 · 0:07</div>
+          <div class="bubble sent">that was fast 🔥</div>
+        </div>
+        <div class="card-body">
+          <h3>Finished cut, texted back</h3>
+          <div class="tag-row">
+            <span class="tag">Same thread</span>
+            <span class="tag filled">Auto-cut</span>
+          </div>
+        </div>
+      </div>
+      <div class="cat-card">
+        <div class="thread">
+          <div class="bubble recv">3 pro editors reviewed your cut — 4.3/5. "Tighten the intro." "Great pacing."</div>
+          <div class="bubble sent">love it, post it</div>
+        </div>
+        <div class="card-body">
+          <h3>Real editors weigh in</h3>
+          <div class="tag-row">
+            <span class="tag">Human review</span>
+            <span class="tag filled">Verified pros</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Dark pain-point block -->
+<section>
+  <div class="container">
+    <div class="dark-block">
+      <div>
+        <h2>Editing software wasn't built for people with things to post.</h2>
+        <p class="sub">Every hour spent learning a timeline is an hour your content didn't ship. jptr removes the entire workflow between "I filmed something" and "it's ready."</p>
+      </div>
+      <ul class="pain-list">
+        <li>No editing software to learn</li>
+        <li>No exporting, uploading, or file transfers</li>
+        <li>No back-and-forth with freelancers</li>
+        <li>No new app on your phone</li>
+        <li>No waiting days for a revision</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section id="how">
+  <div class="container">
+    <div class="section-head">
+      <h2>Three texts. One finished video.</h2>
+      <p>Connect your clips once, then every edit is just a message.</p>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card">
+        <span class="step-num">1</span>
+        <h3>Connect your clips</h3>
+        <p>Share your Google Drive folder with jptr — one share, no OAuth screens — or drag and drop clips into a link we text you. That's the whole setup.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-num">2</span>
+        <h3>Text what you want</h3>
+        <p>"Cut the non-talking parts." "Stitch these into one clip." Our agent parses the request, pulls your footage, and runs the cut automatically.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-num">3</span>
+        <h3>Get it back in-thread</h3>
+        <p>The finished video arrives as a reply in the same conversation — followed by ratings and notes from verified human editors who reviewed your cut.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<section>
+  <div class="container">
+    <div class="stats-row">
+      <div class="stat">
+        <span class="num">1</span>
+        <span class="label">text is all it takes to start an edit</span>
+      </div>
+      <div class="stat">
+        <span class="num">41%</span>
+        <span class="label">average dead air removed per cut</span>
+      </div>
+      <div class="stat">
+        <span class="num">3</span>
+        <span class="label">verified human editors review every cut</span>
+      </div>
+      <div class="stat">
+        <span class="num">0</span>
+        <span class="label">apps to download, ever</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Breakthrough divider -->
+<section>
+  <div class="breakthrough">
+    <div class="big-bubble">"cut my 4 salon clips" — that's it. that's the product.</div>
+  </div>
+</section>
+
+<!-- Testimonials -->
+<section id="reviews" style="padding-top: var(--section-gap);">
+  <div class="container">
+    <div class="section-head">
+      <h2>People who post, love it.</h2>
+      <p>Creators, salon owners, and small teams who film all day and edit never.</p>
+    </div>
+    <div class="quote-grid">
+      <div class="quote-card">
+        <blockquote>"I filmed a client transformation between appointments and had a postable clip before my next one sat down. I didn't open a single app."</blockquote>
+        <div class="quote-meta">
+          <span class="avatar">MR</span>
+          <div>
+            <div class="who">Maya R.</div>
+            <div class="role">Salon owner</div>
+          </div>
+        </div>
+      </div>
+      <div class="quote-card">
+        <blockquote>"The human editor feedback is the killer feature. It's like having a post-production team in my group chats."</blockquote>
+        <div class="quote-meta">
+          <span class="avatar">DK</span>
+          <div>
+            <div class="who">Devon K.</div>
+            <div class="role">Short-form creator</div>
+          </div>
+        </div>
+      </div>
+      <div class="quote-card">
+        <blockquote>"We tried three editing apps and two freelancers. Texting jptr replaced all of them."</blockquote>
+        <div class="quote-meta">
+          <span class="avatar">AL</span>
+          <div>
+            <div class="who">Ana L.</div>
+            <div class="role">Marketing lead, 4-person team</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Final CTA -->
+<section id="start">
+  <div class="container">
+    <div class="final-cta">
+      <h2>The easiest way to edit is the way you already talk.</h2>
+      <p>Get a number, text your clips, and never open an editing app again.</p>
+      <form class="email-capture" onsubmit="event.preventDefault(); this.querySelector('input').value=''; alert('You\'re on the list — we\'ll text you.');">
+        <input type="email" placeholder="Enter your email" required />
+        <button class="btn-dark" type="submit">Get early access</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container footer-inner">
+    <a class="logo" href="#"><span class="logo-mark">j</span>jptr</a>
+    <nav class="footer-links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#reviews">Reviews</a>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+    </nav>
+    <p class="footer-note">© 2026 jptr. Video editing over iMessage.</p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    const rotator = document.getElementById('rotator');
+    const words = rotator.querySelectorAll('span');
+    let i = 0;
+    setInterval(function () {
+      words[i].classList.remove('active');
+      i = (i + 1) % words.length;
+      words[i].classList.add('active');
+    }, 2400);
+  })();
+</script>
+
+</body>
+</html>

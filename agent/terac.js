@@ -26,6 +26,8 @@ const readJson = (f, dflt) => {
 };
 
 async function ensureProject() {
+  // set TERAC_PROJECT_ID to launch into an existing dashboard project instead of making a new one
+  if (process.env.TERAC_PROJECT_ID) return console.log("[terac] project (env)", process.env.TERAC_PROJECT_ID), process.env.TERAC_PROJECT_ID;
   const cached = readJson(PROJECT_CACHE, null);
   if (cached && cached.id) return console.log("[terac] project (cached)", cached.id), cached.id;
   const out = await terac("/projects", { method: "POST", body: JSON.stringify({ name: "jptr edit review" }) });
@@ -93,7 +95,9 @@ async function launchReview({ videoPath, chatId }) {
         num_participants: num,
         business_type: "b2c",
         description: "Watch a short auto-edited video and give a rating + one suggestion. ~4 minutes.",
-        // ponytail: no filters array — add job_function filter when option values confirmed at booth
+        // creator-adjacent roles, confirmed live from GET /filters/multi_select--job_function/options
+        filters: [{ "multi_select--job_function": { "$in":
+          (process.env.TERAC_JOB_FUNCTIONS || "art-creative,design,marketing,production,writing-editing,advertising").split(",") } }],
         screening_questions: [{
           key: "edits_video",
           text: "Do you edit or post short-form video at least weekly?",
@@ -102,7 +106,8 @@ async function launchReview({ videoPath, chatId }) {
         }],
         tasks: [{
           sequence: 1,
-          task_type: process.env.TERAC_TASK_TYPE || "survey",
+          // verified live 2026-07-24: valid enums are interview | file_upload | activity
+          task_type: process.env.TERAC_TASK_TYPE || "activity",
           review_type: process.env.TERAC_REVIEW_TYPE || "auto_approve",
           task_url: taskUrl,
           duration_minutes: 4,
@@ -114,7 +119,7 @@ async function launchReview({ videoPath, chatId }) {
     });
     oppId = opp.id || (opp.data && opp.data.id);
     console.log("[terac] opportunity created", oppId);
-    await terac(`/opportunities/${oppId}/launch`, { method: "POST" });
+    await terac(`/opportunities/${oppId}/launch`, { method: "POST", body: "{}" });
     console.log("[terac] opportunity LAUNCHED", oppId, "->", taskUrl);
   }
 
