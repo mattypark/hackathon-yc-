@@ -16,13 +16,24 @@ Deps: pip install auto-editor gdown   (auto-editor bundles ffmpeg)
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+# Callers (pm2/node spawn) often lack pip-scripts + homebrew dirs on PATH —
+# prepend them so auto-editor/ffmpeg/ffprobe/gdown resolve everywhere.
+os.environ["PATH"] = os.pathsep.join([
+    str(Path.home() / "Library" / "Python" / "3.9" / "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    os.environ.get("PATH", ""),
+])
+
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 OUTPUT_DIR = Path("./output")
+AUTO_EDITOR = shutil.which("auto-editor") or "auto-editor"
 DEFAULT_MARGIN_SEC = 0.2
 # Tuning knob for noisy footage (salon background music etc.).
 # Higher threshold = more aggressive cutting. Try 0.04-0.10 if too little gets cut.
@@ -84,7 +95,7 @@ def cut_clip(clip: Path, index: int, margin_sec: float) -> Path:
     if audio_codec_of(clip).startswith("pcm"):
         clip = normalize_audio(clip, index)
     out = OUTPUT_DIR / f"cut_{index}.mp4"
-    cmd = ["auto-editor", str(clip), "--margin", f"{margin_sec}sec", "--no-open", "-o", str(out)]
+    cmd = [AUTO_EDITOR, str(clip), "--margin", f"{margin_sec}sec", "--no-open", "-o", str(out)]
     if AUDIO_THRESHOLD:
         cmd += ["--edit", f"audio:threshold={AUDIO_THRESHOLD}"]
     result = run(cmd)
@@ -124,7 +135,7 @@ def probe_duration(video: Path) -> float:
 def export_premiere_timeline(first_clip: Path, margin_sec: float) -> None:
     """Garnish for Person 3 — Premiere XML of the cut. Non-fatal if it fails."""
     run([
-        "auto-editor", str(first_clip), "--margin", f"{margin_sec}sec",
+        AUTO_EDITOR, str(first_clip), "--margin", f"{margin_sec}sec",
         "--export", "premiere", "--no-open", "-o", str(OUTPUT_DIR / "timeline.xml"),
     ])
 
