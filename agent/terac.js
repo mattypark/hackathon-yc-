@@ -1,128 +1,152 @@
-/**
- * jptr — Terac human-in-the-loop client.
- * Terac recruits + screens verified human editors; they review the cut on OUR
- * hosted page (messaging GET /review/:id), which stores feedback locally.
- * Terac is poll-only (no webhooks). See ../ARCHITECTURE.md.
- */
-const fs = require('fs');
-const path = require('path');
+// Terac human-in-the-loop client: create opportunity, launch, poll, summarize, send.
+const fs = require("fs");
+const path = require("path");
 
-const BASE = 'https://terac.com/api/external/v2';
-const ROOT = path.join(__dirname, '..');
-const FEEDBACK_DIR = path.join(ROOT, 'feedback');
-const PROJECT_CACHE = path.join(__dirname, 'terac-project.json');
-const POLL_INTERVAL_MS = 60_000;
-const MAX_POLL_MINUTES = 45;
-const TARGET_REVIEWS = 3;
+const BASE = process.env.TERAC_BASE || "https://terac.com/api/external/v2";
+const PROJECT_CACHE = path.join(__dirname, "terac-project.json");
+const MOCK = process.env.MOCK_TERAC === "1";
+const state = new Map(); // ponytail: in-memory, dies with the process — fine for a demo
 
-const polls = {}; // localId -> { oppId, startedAt, entries, done }
-
-async function api(method, route, body) {
-  const res = await fetch(`${BASE}${route}`, {
-    method,
+async function terac(p, opts = {}) {
+  const res = await fetch(`${BASE}${p}`, {
+    ...opts,
     headers: {
       Authorization: `Bearer ${process.env.TERAC_API_KEY}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
+      ...opts.headers,
     },
-    body: body ? JSON.stringify(body) : undefined,
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(`terac ${method} ${route} -> ${res.status}: ${JSON.stringify(json).slice(0, 300)}`);
+  const body = await res.text();
+  if (!res.ok) throw new Error(`terac ${opts.method || "GET"} ${p} -> ${res.status}: ${body}`);
+  return body ? JSON.parse(body) : {};
+}
+
+const readJson = (f, dflt) => {
+  try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return dflt; }
+};
+
+async function ensureProject() {
+  const cached = readJson(PROJECT_CACHE, null);
+  if (cached && cached.id) return console.log("[terac] project (cached)", cached.id), cached.id;
+  const out = await terac("/projects", { method: "POST", body: JSON.stringify({ name: "jptr edit review" }) });
+  const id = out.id || (out.data && out.data.id);
+  fs.writeFileSync(PROJECT_CACHE, JSON.stringify({ id }));
+  console.log("[terac] project created", id);
+  return id;
+}
+
+async function send(chatId, text) {
+  const url = `${process.env.MESSAGING_URL || "http://localhost:4000"}/send`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, text }),
+    });
+    console.log("[terac] summary sent", res.status, JSON.stringify(text));
+  } catch (e) {
+    console.error("[terac] send failed:", e.message);
   }
-  return json;
 }
 
-async function getProjectId() {
-  if (fs.existsSync(PROJECT_CACHE)) {
-    return JSON.parse(fs.readFileSync(PROJECT_CACHE, 'utf8')).id;
+async function summarize(feedback) {
+  const n = feedback.length;
+  if (!n) return "still waiting on the human editors — reviews are still coming in, i'll ping you the moment they land 🧑‍🎨";
+  const ratings = feedback.map((f) => Number(f.rating)).filter((r) => !isNaN(r));
+  const avg = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "—";
+  const quotes = feedback.map((f) => (f.comments || "").trim()).filter(Boolean).slice(0, 2);
+  const fallback = `🧑‍🎨 ${n} human editors reviewed your cut — ${avg}/5.` +
+    quotes.map((q) => `\n"${q}"`).join("");
+  try {
+    const out = await require("./llm").complete({
+      system: "Summarize video review feedback in 2 friendly sentences for an iMessage.",
+      user: JSON.stringify(feedback),
+      maxTokens: 150,
+    });
+    // ponytail: a JSON-looking reply means the llm mock/misfire leaked — use the template
+    return out && out.trim() && !out.trim().startsWith("{")
+      ? `🧑‍🎨 ${n} human editors reviewed your cut — ${avg}/5.\n${out.trim()}`
+      : fallback;
+  } catch (e) {
+    console.log("[terac] llm summary failed, using template:", e.message);
+    return fallback;
   }
-  const project = await api('POST', '/projects', { name: 'jptr edit review' });
-  fs.writeFileSync(PROJECT_CACHE, JSON.stringify(project, null, 2));
-  return project.id;
 }
 
-/** Enumerate job_function options once so we can pick editor/creator values. */
-async function listJobFunctions() {
-  return api('GET', '/filters/multi_select--job_function/options');
-}
+async function launchReview({ videoPath, chatId }) {
+  const localId = Math.random().toString(36).slice(2, 8);
+  if (!process.env.PUBLIC_URL) console.warn("[terac] PUBLIC_URL unset — reviewers can't reach the page from outside");
+  const taskUrl = `${process.env.PUBLIC_URL || "http://localhost:4000"}/review/${localId}`;
+  const num = Number(process.env.TERAC_NUM_PARTICIPANTS || 3);
+  console.log("[terac] launchReview", { videoPath, chatId, localId, taskUrl, mock: MOCK });
 
-async function launchReview() {
-  const projectId = await getProjectId();
-  const localId = `r${Date.now().toString(36)}`;
-  const taskUrl = `${process.env.PUBLIC_URL}/review/${localId}`;
+  let oppId;
+  if (MOCK) {
+    oppId = "mock_opp_" + Date.now();
+    console.log("[terac] MOCK_TERAC=1 — skipping network, oppId", oppId);
+  } else {
+    const opp = await terac("/opportunities", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Rate a 60-second auto-edited salon clip",
+        project_id: await ensureProject(),
+        num_participants: num,
+        business_type: "b2c",
+        description: "Watch a short auto-edited video and give a rating + one suggestion. ~4 minutes.",
+        // ponytail: no filters array — add job_function filter when option values confirmed at booth
+        screening_questions: [{
+          key: "edits_video",
+          text: "Do you edit or post short-form video at least weekly?",
+          pick: "one",
+          answers: [{ text: "Yes", qualify_logic: "must" }, { text: "No", qualify_logic: "reject" }],
+        }],
+        tasks: [{
+          sequence: 1,
+          task_type: process.env.TERAC_TASK_TYPE || "survey",
+          review_type: process.env.TERAC_REVIEW_TYPE || "auto_approve",
+          task_url: taskUrl,
+          duration_minutes: 4,
+        }],
+      }),
+    }).catch((e) => {
+      if (/task_type/i.test(e.message)) console.error("[terac] HINT: task_type rejected — retry with TERAC_TASK_TYPE=interview");
+      throw e;
+    });
+    oppId = opp.id || (opp.data && opp.data.id);
+    console.log("[terac] opportunity created", oppId);
+    await terac(`/opportunities/${oppId}/launch`, { method: "POST" });
+    console.log("[terac] opportunity LAUNCHED", oppId, "->", taskUrl);
+  }
 
-  const opportunity = await api('POST', '/opportunities', {
-    title: 'Rate a short auto-edited video clip',
-    project_id: projectId,
-    num_participants: TARGET_REVIEWS,
-    business_type: 'b2c',
-    description:
-      'Watch a short auto-edited video and give a star rating plus one concrete suggestion. About 4 minutes.',
-    screening_questions: [
-      {
-        key: 'edits_video',
-        text: 'Do you edit or post short-form video at least weekly?',
-        pick: 'one',
-        answers: [
-          { text: 'Yes', qualify_logic: 'must' },
-          { text: 'No', qualify_logic: 'reject' },
-        ],
-      },
-    ],
-    tasks: [
-      {
-        sequence: 1,
-        task_type: 'survey',
-        review_type: 'auto_approve',
-        task_url: taskUrl,
-        duration_minutes: 4,
-      },
-    ],
-  });
+  const st = { oppId, localId, chatId, taskUrl, launchedAt: Date.now(), lastPollAt: null, submissionCounts: {}, feedbackCount: 0, done: false, summarySent: false };
+  state.set(oppId, st);
+  state.set(localId, st);
 
-  await api('POST', `/opportunities/${opportunity.id}/launch`);
-  console.log(`[terac] launched opportunity ${opportunity.id} -> ${taskUrl}`);
-  return { localId, oppId: opportunity.id, taskUrl };
-}
-
-/** Poll local feedback store (review page writes it) + Terac submission stats.
- * Calls onDone(entries) once TARGET_REVIEWS collected or timer expires. */
-function pollUntilDone({ localId, oppId }, onDone) {
-  const state = (polls[localId] = { oppId, startedAt: Date.now(), entries: [], done: false });
+  const timeoutMs = Number(process.env.TERAC_TIMEOUT_MIN || 45) * 60_000;
   const timer = setInterval(async () => {
-    try {
-      const file = path.join(FEEDBACK_DIR, `${localId}.json`);
-      state.entries = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
-      const elapsedMin = (Date.now() - state.startedAt) / 60_000;
-      // side info for logs/judges — not required for completion
-      api('GET', `/opportunities/${oppId}`).then((o) =>
-        console.log(`[terac] ${oppId} stats:`, JSON.stringify(o.submission_stats ?? {})),
-      ).catch(() => {});
-      if (state.entries.length >= TARGET_REVIEWS || elapsedMin > MAX_POLL_MINUTES) {
-        clearInterval(timer);
-        state.done = true;
-        if (state.entries.length > 0) onDone(state.entries);
-        else console.log(`[terac] ${localId} expired with no feedback`);
+    st.lastPollAt = Date.now();
+    const local = readJson(path.join(__dirname, "..", "feedback", `${localId}.json`), []);
+    st.feedbackCount = local.length;
+    if (!MOCK) {
+      try {
+        const subs = await terac(`/opportunities/${oppId}/submissions?status=approved&limit=100`);
+        st.submissionCounts.approved = (subs.data || []).length;
+      } catch (e) {
+        console.error("[terac] poll (submissions) failed, continuing:", e.message);
       }
-    } catch (err) {
-      console.error('[terac] poll error:', err.message);
     }
-  }, POLL_INTERVAL_MS);
+    const elapsed = Date.now() - st.launchedAt;
+    console.log(`[terac] poll ${oppId} local=${local.length}/${num} approved=${st.submissionCounts.approved ?? "?"} elapsed=${Math.round(elapsed / 60000)}m`);
+    if (local.length < num && elapsed < timeoutMs) return;
+    clearInterval(timer);
+    st.done = true;
+    await send(chatId, await summarize(local));
+    st.summarySent = true;
+  }, Number(process.env.TERAC_POLL_MS || 60_000));
+
+  return { oppId, localId, dashboardHint: "https://terac.com dashboard → opportunities" };
 }
 
-function status(localId) {
-  const state = polls[localId];
-  if (!state) return { ok: false, error: 'unknown opportunity' };
-  return {
-    ok: true,
-    oppId: state.oppId,
-    reviews: state.entries.length,
-    target: TARGET_REVIEWS,
-    elapsedMin: Math.round((Date.now() - state.startedAt) / 60_000),
-    done: state.done,
-    entries: state.entries,
-  };
-}
+const getStatus = (id) => state.get(id) || { error: "unknown opportunity" };
 
-module.exports = { launchReview, pollUntilDone, status, listJobFunctions };
+module.exports = { launchReview, getStatus };
