@@ -1,16 +1,27 @@
 {
-  "name": "messaging",
+  "name": "jptr-messaging",
   "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "description": "**Hackathon build. 4 hours. 3 people. Zero merge conflicts by design.**",
+  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "subscribe": "node subscribe.js",
+    "test-send": "node test-send.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattypark/hackathon-yc-.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/mattypark/hackathon-yc-/issues"
+  },
+  "homepage": "https://github.com/mattypark/hackathon-yc-#readme",
   "dependencies": {
+    "@linqapp/sdk": "^0.29.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "multer": "^2.2.0"

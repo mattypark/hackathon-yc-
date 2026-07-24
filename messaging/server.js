@@ -1,275 +1,186 @@
-/**
- * jptr messaging — Person 1 surface (port 4000)
- * Linq iMessage I/O + drag-drop upload + Terac review page + media serving.
- * See ../ARCHITECTURE.md for the canonical endpoint map.
- */
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// messaging :4000 — Person 1. Endpoint map is canonical in ../ARCHITECTURE.md
+import "dotenv/config";
+import express from "express";
+import multer from "multer";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { client, sendText, sendVideo } from "./linq.js";
 
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const express = require('express');
-const multer = require('multer');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLIPS_DIR = path.join(__dirname, "..", "clips");
+const OUTPUT_DIR = path.join(__dirname, "..", "output");
+const FEEDBACK_DIR = path.join(__dirname, "..", "feedback");
+for (const d of [CLIPS_DIR, OUTPUT_DIR, FEEDBACK_DIR]) fs.mkdirSync(d, { recursive: true });
 
-const PORT = 4000;
-const AGENT_URL = 'http://localhost:4001';
-const ROOT = path.join(__dirname, '..');
-const CLIPS_DIR = path.join(ROOT, 'clips');
-const OUTPUT_DIR = path.join(ROOT, 'output');
-const FEEDBACK_DIR = path.join(ROOT, 'feedback');
-const LINQ_BASE = 'https://api.linqapp.com/api/partner/v3';
-const ACCEPTED_EXTS = new Set(['.mp4', '.mov', '.m4v']);
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-
-const { LINQ_API_KEY, LINQ_FROM_NUMBER, PUBLIC_URL } = process.env;
-
-for (const dir of [CLIPS_DIR, OUTPUT_DIR, FEEDBACK_DIR]) fs.mkdirSync(dir, { recursive: true });
+const AGENT_URL = process.env.AGENT_URL || "http://localhost:4001/handle";
+const PORT = process.env.PORT || 4000;
 
 const app = express();
 
-// ---------------------------------------------------------------- linq client
-
-async function linq(method, route, body) {
-  const res = await fetch(`${LINQ_BASE}${route}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${LINQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { json = { raw: text }; }
-  if (!res.ok) {
-    console.error(`[linq] ${method} ${route} -> ${res.status}`, text.slice(0, 500));
-  }
-  return { status: res.status, body: json };
-}
-
-async function sendMessage({ to, text, videoPath, caption }) {
-  const parts = [];
-  if (text || caption) parts.push({ type: 'text', value: text || caption });
-  if (videoPath) {
-    const filename = path.basename(videoPath);
-    parts.push({ type: 'media', url: `${PUBLIC_URL}/media/${filename}` });
-  }
-  return linq('POST', '/chats', {
-    from: LINQ_FROM_NUMBER,
-    to: [to],
-    message: { parts },
-  });
-}
-
-// ------------------------------------------------------- webhook subscription
-
-async function ensureWebhookSubscription() {
-  if (!PUBLIC_URL) {
-    console.warn('[boot] PUBLIC_URL unset — skipping webhook subscribe (set it after tunnel is up)');
-    return;
-  }
-  const target = `${PUBLIC_URL}/webhook/linq`;
-  const existing = await linq('GET', '/webhook-subscriptions');
-  const subs = existing.body?.data ?? existing.body?.webhook_subscriptions ?? [];
-  if (Array.isArray(subs) && subs.some((s) => s.target_url === target)) {
-    console.log('[boot] webhook subscription already exists');
-    return;
-  }
-  const created = await linq('POST', '/webhook-subscriptions', {
-    target_url: target,
-    subscribed_events: ['message.received'],
-  });
-  console.log('[boot] webhook subscribe ->', created.status);
-}
-
-// --------------------------------------------------------------------- routes
-
-// Inbound Linq webhook. Raw body for HMAC; verification is best-effort —
-// if LINQ_WEBHOOK_SECRET is unset we accept (hackathon mode).
-app.post('/webhook/linq', express.raw({ type: '*/*' }), async (req, res) => {
-  res.sendStatus(200); // ack immediately, process async
+// ---------------------------------------------------------------- 1. webhook
+// Raw body on this route ONLY — unwrap() verifies the signature over raw bytes.
+const seenEvents = new Set(); // Linq delivery is at-least-once; dedupe by event id
+app.post("/webhook/linq", express.raw({ type: "*/*" }), (req, res) => {
+  let event;
   try {
-    const secret = process.env.LINQ_WEBHOOK_SECRET;
-    if (secret) {
-      const signed = `${req.headers['webhook-id']}.${req.headers['webhook-timestamp']}.${req.body}`;
-      const expected = crypto
-        .createHmac('sha256', Buffer.from(secret.replace(/^whsec_/, ''), 'base64'))
-        .update(signed)
-        .digest('base64');
-      const given = String(req.headers['webhook-signature'] || '')
-        .split(' ')
-        .map((s) => s.split(',').pop());
-      if (!given.includes(expected)) {
-        console.warn('[webhook] signature mismatch — dropping');
-        return;
-      }
-    }
-    const event = JSON.parse(req.body.toString('utf8'));
-    console.log('[webhook] event:', JSON.stringify(event).slice(0, 400));
-    const payload = event.data ?? event.payload ?? event;
-    const message = payload.message ?? payload;
-    const text = message?.text
-      ?? message?.parts?.filter((p) => p.type === 'text').map((p) => p.value).join(' ')
-      ?? '';
-    const from = payload.from ?? message?.from ?? payload.sender ?? '';
-    const chatId = payload.chat_id ?? payload.chatId ?? from;
-    if (!text) return;
-    await fetch(`${AGENT_URL}/handle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatId, text, from }),
-    }).catch((err) => console.error('[webhook] agent forward failed:', err.message));
+    event = client.webhooks.unwrap(req.body.toString("utf8"), { headers: req.headers });
   } catch (err) {
-    console.error('[webhook] error:', err);
+    console.error("[webhook] bad signature:", err.message);
+    return res.status(401).end();
   }
+  res.status(200).end(); // ack fast (10s timeout); process async below
+
+  if (event.event_type !== "message.received") return;
+  if (seenEvents.has(event.event_id)) return;
+  seenEvents.add(event.event_id);
+  if (seenEvents.size > 5000) seenEvents.clear();
+
+  const msg = event.data;
+  if (msg.direction !== "inbound") return; // never react to our own sends
+
+  const text = (msg.parts || [])
+    .filter((p) => p.type === "text")
+    .map((p) => p.value)
+    .join(" ")
+    .trim();
+  if (!text) return; // media-only message; nothing for the agent to parse yet
+
+  const payload = { chatId: msg.chat.id, text, from: msg.sender_handle?.handle };
+  console.log("[webhook] inbound:", payload);
+  fetch(AGENT_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.error("[webhook] agent forward failed:", err.message));
 });
 
 app.use(express.json());
 
-// Outbound send (agent calls this)
-app.post('/send', async (req, res) => {
-  const { chatId, text, videoPath, caption } = req.body ?? {};
-  if (!chatId || (!text && !videoPath)) {
-    return res.status(400).json({ ok: false, error: 'chatId and text or videoPath required' });
+// ------------------------------------------------------------------ 2. /send
+// CONTRACT surface: { chatId, text?, videoPath?, caption? }
+app.post("/send", async (req, res) => {
+  const { chatId, text, videoPath, caption } = req.body || {};
+  if (!chatId) return res.status(400).json({ ok: false, error: "chatId required" });
+  try {
+    const result = videoPath
+      ? await sendVideo(chatId, videoPath, caption)
+      : await sendText(chatId, text || caption || "");
+    console.log("[send] ok:", result);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[send] failed:", err.message);
+    res.status(502).json({ ok: false, error: err.message });
   }
-  const result = await sendMessage({ to: chatId, text, videoPath, caption });
-  res.status(result.status < 400 ? 200 : 502).json({ ok: result.status < 400, linq: result.body });
 });
 
-// Drag-drop upload page
+// ---------------------------------------------------------------- 3. /upload
 const upload = multer({
   storage: multer.diskStorage({
     destination: CLIPS_DIR,
     filename: (_req, file, cb) => cb(null, path.basename(file.originalname)),
   }),
-  limits: { fileSize: MAX_UPLOAD_BYTES },
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (_req, file, cb) =>
-    cb(null, ACCEPTED_EXTS.has(path.extname(file.originalname).toLowerCase())),
+    cb(null, /\.(mp4|mov|m4v)$/i.test(file.originalname)),
 });
 
-app.get('/upload', (_req, res) => {
-  res.type('html').send(UPLOAD_PAGE);
-});
-
-app.post('/upload', upload.array('clips', 10), (req, res) => {
-  const count = (req.files ?? []).length;
-  console.log(`[upload] received ${count} clip(s)`);
-  res.json({ ok: true, count });
-});
-
-// Terac review page
-app.get('/review/:id', (req, res) => {
-  const id = path.basename(req.params.id);
-  res.type('html').send(reviewPage(id));
-});
-
-app.post('/review/:id/feedback', (req, res) => {
-  const id = path.basename(req.params.id);
-  const file = path.join(FEEDBACK_DIR, `${id}.json`);
-  const entry = {
-    oppId: id,
-    participantId: req.body?.participantId ?? null,
-    rating: Number(req.body?.rating) || null,
-    comments: String(req.body?.comments ?? '').slice(0, 2000),
-    submittedAt: new Date().toISOString(),
-  };
-  const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
-  fs.writeFileSync(file, JSON.stringify([...existing, entry], null, 2));
-  console.log(`[review] feedback for ${id}: ${entry.rating}★`);
-  res.json({ ok: true });
-});
-
-// Static media (Linq media parts + review page video src)
-app.use('/media', express.static(OUTPUT_DIR));
-
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'jptr-messaging' }));
-
-// ---------------------------------------------------------------------- pages
-
-const UPLOAD_PAGE = /* html */ `<!doctype html>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+app.get("/upload", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>jptr — drop your clips</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 8vh auto; padding: 0 20px; }
-  h1 { font-size: 1.5rem; }
-  #zone { border: 2px dashed #888; border-radius: 16px; padding: 48px 24px; text-align: center;
-          cursor: pointer; transition: border-color 150ms, background 150ms; }
-  #zone.drag { border-color: #0a84ff; background: rgba(10,132,255,.08); }
-  #status { margin-top: 16px; font-weight: 600; }
+  body{font-family:-apple-system,sans-serif;background:#0b0b0f;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}
+  #zone{border:2px dashed #555;border-radius:16px;padding:60px 40px;text-align:center;max-width:420px}
+  #zone.over{border-color:#4af;background:#14141c}
+  input{display:none} label{color:#4af;cursor:pointer;text-decoration:underline}
+  #status{margin-top:16px;color:#8f8}
 </style>
-<h1>jptr 🎬</h1>
-<p>Drop your clips (.mp4 / .mov / .m4v, max 500MB each) — then text me what you want.</p>
-<div id="zone">drag & drop here<br>or tap to choose</div>
-<input id="picker" type="file" accept="video/mp4,video/quicktime" multiple hidden>
-<div id="status"></div>
+<div id="zone">
+  <h2>🎬 drop your clips</h2>
+  <p>drag files here or <label for="f">browse</label></p>
+  <input id="f" type="file" multiple accept="video/mp4,video/quicktime,.mp4,.mov,.m4v">
+  <div id="status"></div>
+</div>
 <script>
-  const zone = document.getElementById('zone');
-  const picker = document.getElementById('picker');
-  const status = document.getElementById('status');
-  zone.onclick = () => picker.click();
-  zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('drag'); };
-  zone.ondragleave = () => zone.classList.remove('drag');
-  zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('drag'); send(e.dataTransfer.files); };
-  picker.onchange = () => send(picker.files);
-  async function send(files) {
-    const form = new FormData();
-    for (const f of files) form.append('clips', f);
-    status.textContent = 'uploading ' + files.length + ' clip(s)…';
-    const res = await fetch('/upload', { method: 'POST', body: form });
-    const json = await res.json();
-    status.textContent = json.ok ? json.count + ' clip(s) ready ✅ — go text me!' : 'upload failed, retry';
-  }
-</script>`;
-
-function reviewPage(id) {
-  return /* html */ `<!doctype html>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rate this edit</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, sans-serif; max-width: 520px; margin: 6vh auto; padding: 0 20px; }
-  video { width: 100%; border-radius: 12px; }
-  .stars { display: flex; gap: 8px; font-size: 2rem; margin: 16px 0; }
-  .stars button { background: none; border: none; cursor: pointer; font-size: inherit; opacity: .35; }
-  .stars button.on { opacity: 1; }
-  textarea { width: 100%; min-height: 90px; border-radius: 8px; padding: 10px; font: inherit; }
-  #submit { margin-top: 12px; padding: 12px 28px; border-radius: 10px; border: none;
-            background: #0a84ff; color: #fff; font-weight: 600; font-size: 1rem; cursor: pointer; }
-  #done { font-weight: 700; }
-</style>
-<h2>Watch this auto-edited clip, then rate it</h2>
-<video controls src="/media/final.mp4"></video>
-<div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}">★</button>`).join('')}</div>
-<textarea id="comments" placeholder="What would you change? One concrete suggestion."></textarea>
-<br><button id="submit">Submit review</button>
-<p id="done"></p>
-<script>
-  let rating = 0;
-  document.querySelectorAll('.stars button').forEach((b) => {
-    b.onclick = () => {
-      rating = Number(b.dataset.n);
-      document.querySelectorAll('.stars button').forEach((x) =>
-        x.classList.toggle('on', Number(x.dataset.n) <= rating));
-    };
-  });
-  document.getElementById('submit').onclick = async () => {
-    if (!rating) { alert('pick a star rating'); return; }
-    await fetch('/review/${id}/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rating, comments: document.getElementById('comments').value }),
-    });
-    document.getElementById('done').textContent = 'Thanks — review recorded ✅';
-  };
-</script>`;
+const zone=document.getElementById('zone'),status=document.getElementById('status');
+async function send(files){
+  const fd=new FormData();[...files].forEach(f=>fd.append('clips',f));
+  status.textContent='uploading '+files.length+' file(s)…';
+  const r=await fetch('/upload',{method:'POST',body:fd});
+  const j=await r.json();
+  status.textContent=j.ok?j.count+' clip(s) ready ✅ — text the agent to start':'upload failed';
 }
+zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('over')});
+zone.addEventListener('dragleave',()=>zone.classList.remove('over'));
+zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('over');send(e.dataTransfer.files)});
+document.getElementById('f').addEventListener('change',e=>send(e.target.files));
+</script>`);
+});
 
-// ----------------------------------------------------------------------- boot
+app.post("/upload", upload.array("clips"), (req, res) => {
+  console.log("[upload]", (req.files || []).map((f) => f.filename));
+  res.json({ ok: true, count: (req.files || []).length });
+});
 
-app.listen(PORT, async () => {
-  console.log(`[boot] jptr-messaging on :${PORT}`);
-  if (!LINQ_API_KEY) console.warn('[boot] LINQ_API_KEY missing');
-  if (!LINQ_FROM_NUMBER) console.warn('[boot] LINQ_FROM_NUMBER missing — sends will fail');
-  await ensureWebhookSubscription();
+// ---------------------------------------------------------------- 4. /review
+app.get("/review/:id", (req, res) => {
+  const id = path.basename(req.params.id);
+  res.type("html").send(`<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review this edit</title>
+<style>
+  body{font-family:-apple-system,sans-serif;background:#0b0b0f;color:#eee;max-width:560px;margin:0 auto;padding:24px}
+  video{width:100%;border-radius:12px}
+  .stars{font-size:36px;cursor:pointer;user-select:none}
+  .stars span.on{color:gold}.stars span{color:#444}
+  textarea{width:100%;min-height:80px;border-radius:8px;background:#14141c;color:#eee;border:1px solid #333;padding:10px;box-sizing:border-box}
+  button{background:#4af;color:#000;border:0;border-radius:8px;padding:12px 28px;font-size:16px;margin-top:12px;cursor:pointer}
+  #done{color:#8f8;font-size:20px}
+</style>
+<h2>Rate this auto-edited cut</h2>
+<video controls src="/media/final.mp4"></video>
+<form id="form">
+  <p>How good is this edit?</p>
+  <div class="stars" id="stars">${"<span>★</span>".repeat(5)}</div>
+  <p><textarea id="comments" placeholder="What would you change?"></textarea></p>
+  <button type="submit">Submit review</button>
+</form>
+<p id="done" hidden>Thanks — your feedback was recorded ✅</p>
+<script>
+let rating=0;
+const stars=[...document.querySelectorAll('#stars span')];
+stars.forEach((s,i)=>s.onclick=()=>{rating=i+1;stars.forEach((x,j)=>x.classList.toggle('on',j<=i))});
+document.getElementById('form').onsubmit=async e=>{
+  e.preventDefault();
+  await fetch('/review/${id}/feedback',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({rating,comments:document.getElementById('comments').value})});
+  document.getElementById('form').hidden=true;
+  document.getElementById('done').hidden=false;
+};
+</script>`);
+});
+
+app.post("/review/:id/feedback", (req, res) => {
+  const id = path.basename(req.params.id);
+  const file = path.join(FEEDBACK_DIR, `${id}.json`);
+  const entries = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : [];
+  entries.push({
+    oppId: id,
+    participantId: req.body.participantId ?? null,
+    rating: req.body.rating,
+    comments: req.body.comments || "",
+    submittedAt: new Date().toISOString(),
+  });
+  fs.writeFileSync(file, JSON.stringify(entries, null, 2));
+  console.log(`[review] ${id}: ${req.body.rating}★ "${req.body.comments || ""}"`);
+  res.json({ ok: true, n: entries.length });
+});
+
+// ----------------------------------------------------------------- 5. /media
+app.use("/media", express.static(OUTPUT_DIR)); // review page video src + send fallback
+
+app.listen(PORT, () => {
+  console.log(`[messaging] up on :${PORT}`);
+  console.log(`[messaging] PUBLIC_URL=${process.env.PUBLIC_URL || "(set after tunnel up)"}`);
 });
