@@ -168,6 +168,19 @@ async function runEdit(chatId, session, intent) {
   }
   console.log("edit →", editRequest);
   session.editing = true;
+  // heartbeat: keep the thread alive during long downloads/cuts so the user
+  // always sees motion (shared-line delivery can also drop a single text)
+  const startedAt = Date.now();
+  const beats = [
+    "downloading your clips 📂",
+    "analyzing audio for non-talking sections 🔍",
+    "still cutting — big files take a minute ✂️",
+    "almost there, rendering the final cut 🎬",
+  ];
+  let beatIdx = 0;
+  const heartbeat = setInterval(() => {
+    if (beatIdx < beats.length) sendToMessaging({ chatId, text: beats[beatIdx++] });
+  }, 90_000);
   try {
     const result = await runEditor(editRequest);
     if (!result.ok) {
@@ -185,6 +198,7 @@ async function runEdit(chatId, session, intent) {
     });
     showInPremiere();
   } finally {
+    clearInterval(heartbeat);
     session.editing = false;
   }
 }
