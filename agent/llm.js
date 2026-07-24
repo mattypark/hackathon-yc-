@@ -1,7 +1,7 @@
 // Runware LLM client (OpenAI-compatible chat completions).
 const BASE = process.env.RUNWARE_BASE || "https://api.runware.ai/v1";
 
-async function complete({ system, user, maxTokens = 300 }) {
+async function complete({ system, user, history = [], maxTokens = 300 }) {
   if (process.env.MOCK_LLM === "1") {
     return (
       process.env.MOCK_LLM_RESPONSE ||
@@ -19,6 +19,7 @@ async function complete({ system, user, maxTokens = 300 }) {
       max_tokens: maxTokens,
       messages: [
         { role: "system", content: system },
+        ...history,
         { role: "user", content: user },
       ],
     }),
