@@ -55,8 +55,14 @@ function transcodeToFit(videoPath) {
   return out;
 }
 
+// Relative paths (e.g. "./output/final.mp4" from the agent's EditResult)
+// resolve against the repo root, not this server's cwd.
+const REPO_ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), "..");
+
 export async function uploadVideo(videoPath) {
-  let filePath = path.resolve(videoPath);
+  let filePath = path.isAbsolute(videoPath)
+    ? videoPath
+    : path.resolve(REPO_ROOT, videoPath);
   if (fs.statSync(filePath).size > MAX_BYTES) {
     console.log(`[linq] ${filePath} exceeds ${MAX_BYTES} bytes — transcoding down`);
     filePath = transcodeToFit(filePath);

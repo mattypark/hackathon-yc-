@@ -25,7 +25,7 @@ from pathlib import Path
 # Callers (pm2/node spawn) often lack pip-scripts + homebrew dirs on PATH —
 # prepend them so auto-editor/ffmpeg/ffprobe/gdown resolve everywhere.
 os.environ["PATH"] = os.pathsep.join([
-    str(Path.home() / "Library" / "Python" / "3.9" / "bin"),
+    *[str(p / "bin") for p in sorted((Path.home() / "Library" / "Python").glob("3.*"), reverse=True)],
     "/opt/homebrew/bin",
     "/usr/local/bin",
     os.environ.get("PATH", ""),
@@ -54,7 +54,10 @@ def download_drive_folder(drive_url: str, clips_dir: Path) -> None:
     clips_dir.mkdir(parents=True, exist_ok=True)
     result = run(["gdown", "--folder", drive_url, "-O", str(clips_dir)])
     if result.returncode != 0:
-        fail(f"gdown failed: {result.stderr.strip()[:500]}")
+        stderr = result.stderr.strip()
+        if "status code 404" in stderr or "permission" in stderr.lower() or "Cannot retrieve" in stderr:
+            fail("folder not accessible — needs 'anyone with link' sharing", code="NOT_SHARED")
+        fail(f"gdown failed: {stderr.splitlines()[-1][:200] if stderr else 'unknown'}", code="DOWNLOAD_FAILED")
     # gdown may nest files inside a subfolder named after the Drive folder — flatten.
     for sub in [p for p in clips_dir.iterdir() if p.is_dir()]:
         for item in sub.iterdir():
@@ -152,6 +155,11 @@ def main() -> None:
     margin_sec = float(request.get("marginSec", DEFAULT_MARGIN_SEC))
     drive_url = request.get("driveUrl")
     drive_folder_id = request.get("driveFolderId")
+
+    # Agent can pass audioThreshold for noisy footage (salon music etc.)
+    global AUDIO_THRESHOLD
+    if request.get("audioThreshold"):
+        AUDIO_THRESHOLD = str(request["audioThreshold"])
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 

@@ -1,8 +1,10 @@
 require("dotenv").config({ path: __dirname + "/.env" });
+const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 const express = require("express");
 const llm = require("./llm");
+const demo = require("./demo");
 // ponytail: terac.js is a teammate's file; stub it so the demo boots before it lands.
 let terac;
 try {
@@ -17,18 +19,96 @@ try {
 
 const MESSAGING_URL = process.env.MESSAGING_URL || "http://localhost:4000";
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
-const FALLBACK = { action: "cut_nontalking", source: "unspecified", marginSec: 0.2 };
+const PUBLIC_URL = process.env.PUBLIC_URL || "";
+const ROOT = path.join(__dirname, "..");
+const CLIPS_DIR = path.join(ROOT, "clips");
+const EDITOR_TIMEOUT_MS = 30 * 60 * 1000; // 4K clips take a while
+const VIDEO_EXTS = new Set([".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"]);
 
-const SYSTEM = `You parse video-editing requests from iMessage into JSON. Output ONLY JSON:
-{ "action": "cut_nontalking" | "status" | "review" | "unknown",
-  "source": "drive" | "uploaded" | "unspecified",
-  "marginSec": 0.2 }
-"cut the non-talking parts / dead air / silence" → cut_nontalking.
-"how's it going / done yet" → status. "get feedback / have editors look" → review.
-Anything else → unknown.`;
+// chatId -> { driveFolderId, lastVideoPath, greeted, pendingEdit, history: [{role, content}] }
+const sessions = {};
 
-const app = express();
-app.use(express.json());
+const SYSTEM = `You are jptr — a sharp, fun creative video editor people text over iMessage.
+Personality: enthusiastic collaborator, talks like a friend who happens to be a pro editor.
+Short punchy texts (1-2 sentences), lowercase-casual, an emoji here and there, never corporate.
+
+What you can ACTUALLY do (never promise more):
+- pull clips from a Google Drive folder the user links (or they upload at the upload link)
+- cut out the non-talking parts / dead air / silence, with adjustable breathing room
+- concat everything into one final video and text it back
+- get real human editors to review the cut ("get feedback")
+
+Each user message comes with a CONTEXT line telling you if footage is available.
+Parse the message and reply with ONLY JSON:
+{
+  "action": "chat" | "edit" | "status" | "review",
+  "reply": "<the exact iMessage to send back — ALWAYS required, in your voice>",
+  "marginSec": 0.2,        // breathing room: "tight/snappy" -> 0.1, default 0.2, "relaxed/breathing room" -> 0.4
+  "audioThreshold": null   // noisy footage ("music playing", "loud", "salon/bar") -> 0.04, else null
+}
+Rules:
+- editing/cutting/trimming/removing silence intent -> action "edit".
+  - if CONTEXT says footage available: reply = a fun "on it" ack that sets expectations.
+  - if NOT: reply must ask for their Drive folder link (shared "anyone with link") or the upload page.
+- "how's it going / done yet" -> "status". "get feedback / human review" -> "review".
+- everything else -> "chat": be genuinely conversational, riff on what they said, and if natural,
+  steer toward what you can do. Never repeat the same intro twice — vary it using the conversation history.`;
+
+// ------------------------------------------------------------------ helpers
+
+function extractFolderId(text) {
+  const m = String(text || "").match(/drive\.google\.com\/drive\/folders\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+function clipsPresent() {
+  try {
+    return fs.readdirSync(CLIPS_DIR).some((f) => VIDEO_EXTS.has(path.extname(f).toLowerCase()));
+  } catch {
+    return false;
+  }
+}
+
+function uploadHint() {
+  return PUBLIC_URL ? `${PUBLIC_URL}/upload` : "the upload page (ask us for the link)";
+}
+
+// No-LLM fallback: keyword routing + canned replies keeps the thread alive.
+function keywordIntent(text, footageAvailable) {
+  const t = (text || "").toLowerCase();
+  if (/\b(status|progress|done yet|how'?s it going)\b/.test(t)) return { action: "status", reply: "" };
+  if (/\b(review|feedback|human editors?)\b/.test(t)) return { action: "review", reply: "" };
+  if (/\b(cut|edit|trim|clips?|videos?|footage|silence|dead air|non.?talking|drive)\b/.test(t)) {
+    return {
+      action: "edit",
+      marginSec: 0.2,
+      reply: footageAvailable
+        ? "on it 🎬 — pulling your clips and cutting the dead air. finished video lands here."
+        : `love it — where's the footage? text me your Google Drive folder link (shared "anyone with link"), or drop the files here: ${uploadHint()}`,
+    };
+  }
+  return {
+    action: "chat",
+    reply: `hey! i'm jptr 🎬 — your video editor over text. send me a Drive folder link and say "cut the non-talking parts" and i'll send back the finished cut.`,
+  };
+}
+
+async function parseIntent(text, session) {
+  const footageAvailable = Boolean(session.driveFolderId) || clipsPresent();
+  try {
+    const raw = await llm.complete({
+      system: SYSTEM,
+      history: session.history.slice(-10),
+      user: `CONTEXT: footage ${footageAvailable ? "IS" : "is NOT"} available. upload page: ${uploadHint()}\n\n${text}`,
+    });
+    const intent = JSON.parse(raw.replace(/```(json)?/g, "").trim());
+    if (!intent.action || !intent.reply) return keywordIntent(text, footageAvailable);
+    return intent;
+  } catch (e) {
+    console.log("intent parse failed, using keyword fallback:", e.message);
+    return keywordIntent(text, footageAvailable);
+  }
+}
 
 async function sendToMessaging(payload) {
   console.log("send →", payload);
@@ -44,68 +124,73 @@ async function sendToMessaging(payload) {
   }
 }
 
-async function parseIntent(text) {
-  try {
-    const raw = await llm.complete({ system: SYSTEM, user: text });
-    const intent = JSON.parse(raw.replace(/```(json)?/g, "").trim());
-    return intent.action && intent.action !== "unknown" ? intent : FALLBACK;
-  } catch (e) {
-    console.log("intent parse failed, using fallback:", e.message);
-    return FALLBACK;
-  }
-}
+// ------------------------------------------------------------------- editor
+
+const ERROR_REPLIES = {
+  NOT_SHARED: () =>
+    `hmm, i can't see that folder — flip it to "anyone with link" in Drive sharing and send it again 🙏`,
+  EMPTY_FOLDER: () => `that folder's empty (no videos anyway) — drop your clips in and resend the link`,
+  NO_CREDENTIALS: () => `having a moment with Drive auth — make the folder "anyone with link" and resend?`,
+  DOWNLOAD_FAILED: () => `Drive hiccuped mid-download — send the link once more and i'll retry`,
+};
 
 function runEditor(editRequest) {
   if (process.env.MOCK_EDITOR === "1") {
-    // ponytail: editor cut.py lives on teammate's machine; mock until integration
     return new Promise((r) =>
       setTimeout(() => r({ ok: true, videoPath: "./output/final.mp4", durationSec: 42 }), 1000)
     );
   }
-  const root = path.join(__dirname, "..");
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     execFile(
       PYTHON_BIN,
-      [path.join(root, "editor", "cut.py"), JSON.stringify(editRequest)],
-      { cwd: root, maxBuffer: 10 * 1024 * 1024 },
+      [path.join(ROOT, "editor", "cut.py"), JSON.stringify(editRequest)],
+      { cwd: ROOT, timeout: EDITOR_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => {
-        if (err) return reject(err);
         try {
-          resolve(JSON.parse(stdout));
-        } catch (e) {
-          reject(new Error(`bad EditResult: ${stdout}`));
+          resolve(JSON.parse(stdout.trim().split("\n").pop()));
+        } catch {
+          resolve({ ok: false, error: err?.message ?? "editor produced no JSON", code: "ERROR" });
         }
       }
     );
   });
 }
 
-async function runEdit(chatId, editRequest) {
-  try {
-    console.log("edit →", editRequest);
-    const result = await runEditor(editRequest);
-    if (!result.ok) throw new Error(result.error || "unknown editor error");
-    await sendToMessaging({
-      chatId,
-      videoPath: result.videoPath,
-      caption: `done — cut to ${result.durationSec}s 🎬`,
-    });
-    console.log("terac → launching review for", result.videoPath);
-    terac.launchReview({ videoPath: result.videoPath, chatId }).catch(console.error);
-  } catch (err) {
-    console.error("edit failed", err);
-    await sendToMessaging({ chatId, text: `sorry, editing failed: ${err.message || err}` });
+async function runEdit(chatId, session, intent) {
+  const editRequest = { clipsDir: "./clips", marginSec: intent.marginSec ?? 0.2 };
+  if (intent.audioThreshold) editRequest.audioThreshold = intent.audioThreshold;
+  if (session.driveFolderId) {
+    // public-link path (gdown) — zero-setup; SA path kicks in when sa-key.json exists
+    editRequest.driveUrl = `https://drive.google.com/drive/folders/${session.driveFolderId}`;
   }
+  console.log("edit →", editRequest);
+  const result = await runEditor(editRequest);
+  if (!result.ok) {
+    console.error("edit failed", result);
+    const reply =
+      ERROR_REPLIES[result.code]?.() ??
+      `hit a snag mid-edit (${String(result.error || "unknown").slice(0, 120)}) — try me again?`;
+    return sendToMessaging({ chatId, text: reply });
+  }
+  session.lastVideoPath = result.videoPath;
+  await sendToMessaging({
+    chatId,
+    videoPath: result.videoPath,
+    caption: `done — cut it down to ${result.durationSec}s 🎬 want real human editors to rate it? just say "get feedback"`,
+  });
 }
 
-const demo = require("./demo");
+// -------------------------------------------------------------------- routes
+
+const app = express();
+app.use(express.json());
 
 app.post("/handle", async (req, res) => {
   const { chatId, text } = req.body || {};
   console.log("webhook →", req.body);
+  if (!chatId) return res.status(400).json({ ok: false, error: "chatId required" });
 
-  // Scripted demo: trigger word in the message OR DEMO_MODE=1 forces it for
-  // every edit-looking text. Staged replies -> Premiere screen recording.
+  // Scripted demo: trigger word, or DEMO_MODE=1 forces it for edit-looking texts.
   const wantsEdit = /edit|cut|non.?talking|dead air/i.test(text || "");
   if (/jptr demo/i.test(text || "") || (process.env.DEMO_MODE === "1" && wantsEdit)) {
     res.json({ ok: true, demo: true });
@@ -113,28 +198,59 @@ app.post("/handle", async (req, res) => {
     return;
   }
 
-  const intent = await parseIntent(text || "");
+  res.json({ ok: true }); // ack fast, work async
+  const session = (sessions[chatId] ??= { history: [] });
+
+  // Trust regex over the model for folder ids; a bare link also unblocks a pending edit.
+  const folderId = extractFolderId(text);
+  if (folderId) session.driveFolderId = folderId;
+
+  const intent = await parseIntent(text || "", session);
   console.log("intent →", intent);
+  session.history.push({ role: "user", content: text || "" });
+  session.history.push({ role: "assistant", content: intent.reply || intent.action });
+  if (session.history.length > 20) session.history.splice(0, session.history.length - 20);
 
-  if (intent.action === "status") {
-    await sendToMessaging({ chatId, text: "still working on it 🎬" });
-    return res.json({ ok: true });
+  const footageAvailable = Boolean(session.driveFolderId) || clipsPresent();
+
+  // A fresh Drive link while an edit was waiting = green light, whatever the intent.
+  if (folderId && session.pendingEdit) {
+    const pending = session.pendingEdit;
+    session.pendingEdit = null;
+    await sendToMessaging({ chatId, text: "got the folder 📂 — on it, cutting the dead air now ✂️" });
+    return runEdit(chatId, session, pending);
   }
 
-  if (intent.action === "review") {
-    terac.launchReview({ videoPath: "./output/final.mp4", chatId }).catch(console.error);
-    await sendToMessaging({ chatId, text: "on it — real human editors are reviewing your cut now 🧑‍🎨" });
-    return res.json({ ok: true });
-  }
+  switch (intent.action) {
+    case "status":
+      return sendToMessaging({
+        chatId,
+        text: session.lastVideoPath ? "your cut's done — sent it above ☝️" : "still working on it 🎬",
+      });
 
-  const editRequest = {
-    clipsDir: "./clips",
-    instruction: text,
-    marginSec: intent.marginSec ?? 0.2,
-  };
-  if (process.env.DRIVE_FOLDER_ID) editRequest.driveFolderId = process.env.DRIVE_FOLDER_ID;
-  res.json({ ok: true, accepted: true });
-  runEdit(chatId, editRequest);
+    case "review": {
+      if (!session.lastVideoPath) {
+        return sendToMessaging({ chatId, text: "nothing to review yet — send me clips first!" });
+      }
+      terac.launchReview({ videoPath: session.lastVideoPath, chatId }).catch(console.error);
+      return sendToMessaging({
+        chatId,
+        text: "on it — recruiting real human editors to review your cut 🧑‍🎨 feedback lands here",
+      });
+    }
+
+    case "edit": {
+      if (!footageAvailable) {
+        session.pendingEdit = { marginSec: intent.marginSec ?? 0.2, audioThreshold: intent.audioThreshold };
+        return sendToMessaging({ chatId, text: intent.reply });
+      }
+      await sendToMessaging({ chatId, text: intent.reply });
+      return runEdit(chatId, session, intent);
+    }
+
+    default:
+      return sendToMessaging({ chatId, text: intent.reply });
+  }
 });
 
 app.post("/terac/launch", async (req, res) => {
@@ -150,4 +266,10 @@ app.get("/terac/status/:oppId", (req, res) => {
   res.json(terac.getStatus(req.params.oppId));
 });
 
-app.listen(4001, () => console.log("agent listening on :4001"));
+app.get("/health", (_req, res) => res.json({ ok: true, service: "jptr-agent" }));
+
+app.listen(4001, () => {
+  console.log("agent listening on :4001");
+  if (!process.env.RUNWARE_API_KEY) console.warn("[boot] RUNWARE_API_KEY missing — keyword fallback active");
+  if (process.env.MOCK_EDITOR === "1") console.warn("[boot] MOCK_EDITOR=1 — edits return the seeded demo video");
+});
