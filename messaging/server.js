@@ -5,7 +5,10 @@ import multer from "multer";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
 import { client, sendText, sendVideo } from "./linq.js";
+
+const FROM = process.env.LINQ_FROM_NUMBER;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIPS_DIR = path.join(__dirname, "..", "clips");
@@ -80,9 +83,10 @@ const upload = multer({
     destination: CLIPS_DIR,
     filename: (_req, file, cb) => cb(null, path.basename(file.originalname)),
   }),
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: 6 * 1024 * 1024 * 1024 }, // 6GB — camera files are huge
+  // video + music/SFX + LUTs (editor auto-uses audio as music bed, .cube as grade)
   fileFilter: (_req, file, cb) =>
-    cb(null, /\.(mp4|mov|m4v)$/i.test(file.originalname)),
+    cb(null, /\.(mp4|mov|m4v|mp3|wav|m4a|aac|cube)$/i.test(file.originalname)),
 });
 
 app.get("/upload", (req, res) => {
@@ -100,19 +104,29 @@ app.get("/upload", (req, res) => {
 <div id="zone">
   <h2>🎬 drop your clips</h2>
   <p>drag files here or <label for="f">browse</label></p>
-  <input id="f" type="file" multiple accept="video/mp4,video/quicktime,.mp4,.mov,.m4v">
+  <input id="f" type="file" multiple accept=".mp4,.mov,.m4v,.mp3,.wav,.m4a,.aac,.cube,video/*,audio/*">
+  <p style="color:#888;font-size:.85em">clips + optional music (.mp3/.wav) + LUT (.cube) — agent auto-uses them</p>
   <div id="status"></div>
 </div>
 <script>
 const chat=${JSON.stringify(chat)};
 const zone=document.getElementById('zone'),status=document.getElementById('status');
-async function send(files){
+function send(files){
   const fd=new FormData();[...files].forEach(f=>fd.append('clips',f));
   if(chat) fd.append('chatId',chat);
-  status.textContent='uploading '+files.length+' file(s)…';
-  const r=await fetch('/upload',{method:'POST',body:fd});
-  const j=await r.json();
-  status.textContent=j.ok?j.count+' clip(s) ready ✅ — back to iMessage':'upload failed';
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST','/upload');
+  xhr.upload.onprogress=(e)=>{
+    if(e.lengthComputable) status.textContent='uploading… '+Math.round(e.loaded/e.total*100)+'% ('+(e.loaded/1e6|0)+'MB / '+(e.total/1e6|0)+'MB)';
+  };
+  xhr.onload=()=>{
+    try{const j=JSON.parse(xhr.responseText);
+      status.textContent=j.ok?j.count+' file(s) ready ✅ — back to iMessage':'upload failed: '+(j.error||xhr.status);
+    }catch{status.textContent='upload failed ('+xhr.status+')'}
+  };
+  xhr.onerror=()=>{status.textContent='network error — big files over the tunnel take a while, retry or use Drive'};
+  status.textContent='starting upload…';
+  xhr.send(fd);
 }
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('over')});
 zone.addEventListener('dragleave',()=>zone.classList.remove('over'));
@@ -134,6 +148,59 @@ app.post("/upload", upload.array("clips"), async (req, res) => {
       body: JSON.stringify({ chatId, count }),
     }).catch((err) => console.error("[upload] agent notify failed:", err.message));
   }
+});
+
+// ------------------------------------------------- 3.5 /join — self-onboard
+// Shared Linq line routes inbound BY contact list, so new users must be added
+// before their first text. This page lets them add themselves (judges, anyone).
+app.get("/join", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jptr — join</title>
+<style>
+  body{font-family:-apple-system,sans-serif;background:#0b0b0f;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}
+  #card{border:1px solid #333;border-radius:16px;padding:40px;max-width:380px;text-align:center}
+  input{font-size:1.2rem;padding:12px;border-radius:10px;border:1px solid #444;background:#16161d;color:#eee;width:100%;box-sizing:border-box}
+  button{margin-top:12px;font-size:1.05rem;padding:12px 28px;border-radius:10px;border:0;background:#4af;color:#000;font-weight:700;cursor:pointer}
+  #status{margin-top:14px;color:#8f8;min-height:1.2em}
+</style>
+<div id="card">
+  <h2>🎬 text jptr, your AI video editor</h2>
+  <p>enter your phone number — then text us and send clips</p>
+  <input id="num" type="tel" placeholder="+1 502 999 8282" autocomplete="tel">
+  <button id="go">let me in</button>
+  <div id="status"></div>
+</div>
+<script>
+document.getElementById('go').onclick=async()=>{
+  const raw=document.getElementById('num').value.replace(/[^+\\d]/g,'');
+  const num=raw.startsWith('+')?raw:'+1'+raw;
+  const s=document.getElementById('status');
+  s.textContent='adding you…';
+  const r=await fetch('/join',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})});
+  const j=await r.json();
+  s.innerHTML=j.ok?('you\\'re in ✅ text <b>'+j.linqNumber+'</b> now'):('failed: '+(j.error||''));
+};
+</script>`);
+});
+
+app.post("/join", express.json(), (req, res) => {
+  const number = String(req.body?.number || "").replace(/[^+\d]/g, "");
+  if (!/^\+\d{10,15}$/.test(number)) {
+    return res.status(400).json({ ok: false, error: "bad number — use +1XXXXXXXXXX" });
+  }
+  const linqBin = fs.existsSync(`${process.env.HOME}/.local/bin/linq`)
+    ? `${process.env.HOME}/.local/bin/linq`
+    : "linq";
+  execFile(linqBin, ["contacts", "add", number], { timeout: 15000 }, (err, stdout, stderr) => {
+    const already = /already/i.test(String(stdout) + String(stderr));
+    if (err && !already) {
+      console.error("[join] contacts add failed:", stderr || err.message);
+      return res.status(502).json({ ok: false, error: "couldn't add — 20-contact cap or CLI issue" });
+    }
+    console.log("[join] added", number);
+    res.json({ ok: true, linqNumber: FROM });
+  });
 });
 
 // ---------------------------------------------------------------- 4. /review
