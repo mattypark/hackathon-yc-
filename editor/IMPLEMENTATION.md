@@ -6,7 +6,8 @@ Owns clip ingest (Google Drive / local) + the cut pipeline. Pure CLI, no server.
 
 - ✅ `cut.py` DONE + smoke-tested: synthetic 12s clip (alternating 2s tone/2s silence) → 7.1s output. Non-talking removal + concat + ffprobe duration + Premiere XML garnish all working.
 - ✅ gdown link-share ingest working (`driveUrl` field).
-- ⬜ `drive_ingest.py` — service-account Drive download (`driveFolderId` field). THIS is the remaining build.
+- ✅ `drive_ingest.py` DONE — service-account download (`driveFolderId`), typed error codes (`NO_CREDENTIALS`/`NOT_SHARED`/`EMPTY_FOLDER`/`DOWNLOAD_FAILED`), `service_account_email()` helper for agent onboarding text. Multi-user: one SA, every user shares their own folder to it. Error paths tested; live download pending sa-key.json (GCP setup below).
+- ⬜ GCP setup (manual, ~10 min) + live SA download test + real-footage threshold tuning.
 
 ## Setup
 

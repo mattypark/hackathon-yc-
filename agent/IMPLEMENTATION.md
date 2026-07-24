@@ -32,11 +32,30 @@ System prompt (include verbatim):
 You parse video-editing requests from iMessage into JSON. Output ONLY JSON:
 { "action": "cut_nontalking" | "status" | "review" | "unknown",
   "source": "drive" | "uploaded" | "unspecified",
+  "driveFolderId": "<extracted from any drive.google.com/drive/folders/<ID> URL in the message, else null>",
   "marginSec": 0.2 }
 "cut the non-talking parts / dead air / silence" → cut_nontalking.
 "how's it going / done yet" → status. "get feedback / have editors look" → review.
+If the message contains a Google Drive folder link, extract the folder ID.
 Anything else → unknown.
 ```
+
+### Multi-user Drive (any stranger can use this)
+
+One service account serves ALL users — each user shares THEIR folder to the SA email, then texts the folder link.
+
+- **Session map** (in-memory): `const sessions = {}; // chatId → { driveFolderId, lastVideoPath, oppId }`. When a parsed message carries `driveFolderId`, store it; follow-ups ("now cut it") reuse it.
+- Get the SA email to include in replies: `python3 -c "import sys;sys.path.insert(0,'../editor');from drive_ingest import service_account_email;print(service_account_email())"` (cache at boot).
+- **Editor error codes → reply texts** (cut.py now returns `{ok:false, code, error}`):
+
+| code | reply |
+|---|---|
+| `NOT_SHARED` | "I can't see that folder yet — share it to `<SA email>` (Viewer) in Drive, then text me again. Or make it 'anyone with link'." |
+| `NO_CREDENTIALS` | (ops problem, not user) log + "having a moment, one sec" — check sa-key.json |
+| `EMPTY_FOLDER` | "that folder has no videos — drop your clips in and resend the link" |
+| `DOWNLOAD_FAILED` | "Drive hiccuped, trying again" → one retry |
+
+- If user's folder is link-shared instead, pass `driveUrl` (gdown path) — try SA first, fall back on `NOT_SHARED` only if the URL was public.
 
 Then:
 1. `action === "cut_nontalking"` → build EditRequest:
@@ -52,10 +71,12 @@ Session start (on boot or first message from new chatId): send onboarding text v
 
 ```
 hey! i'm jptr 🎬 two ways to give me clips:
-1. share a Drive folder with jptr-editor@<project>.iam.gserviceaccount.com
+1. share your Drive folder with <SA_EMAIL> (Viewer), then text me the folder link
 2. drag & drop here: ${PUBLIC_URL}/upload
 then text me what you want — e.g. "cut all the non-talking parts"
 ```
+
+(`<SA_EMAIL>` = cached `service_account_email()` value — works for ANY user, that's the whole multi-tenant story.)
 
 ## 2. `agent/terac.js` — human-in-the-loop client
 
