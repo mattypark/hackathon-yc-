@@ -26,7 +26,25 @@ const EDITOR_TIMEOUT_MS = 30 * 60 * 1000; // 4K clips take a while
 const VIDEO_EXTS = new Set([".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"]);
 
 // chatId -> { driveFolderId, lastVideoPath, greeted, pendingEdit, history: [{role, content}] }
-const sessions = {};
+// Sessions persist to disk so pm2 restarts don't wipe chat memory
+// (the "why is it treating me like a new chat" bug).
+const SESSIONS_FILE = path.join(__dirname, "sessions.json");
+const sessions = (() => {
+  try {
+    const loaded = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf8"));
+    Object.values(loaded).forEach((s) => { s.editing = false; }); // never resume mid-edit
+    return loaded;
+  } catch {
+    return {};
+  }
+})();
+let saveTimer = null;
+function saveSessions() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fs.writeFile(SESSIONS_FILE, JSON.stringify(sessions), () => {});
+  }, 500);
+}
 
 const SYSTEM = `You are jptr — a sharp, fun creative video editor people text over iMessage.
 Personality: enthusiastic collaborator, talks like a friend who happens to be a pro editor.
@@ -234,6 +252,7 @@ app.post("/handle", async (req, res) => {
   }
 
   res.json({ ok: true }); // ack fast, work async
+  saveSessions();
   const session = (sessions[chatId] ??= { history: [] });
 
   // Trust regex over the model for folder ids; a bare link also unblocks a pending edit.
@@ -274,11 +293,23 @@ app.post("/handle", async (req, res) => {
       if (!session.lastVideoPath) {
         return sendToMessaging({ chatId, text: "nothing to review yet — send me clips first!" });
       }
-      terac.launchReview({ videoPath: session.lastVideoPath, chatId }).catch(console.error);
-      return sendToMessaging({
+      sendToMessaging({
         chatId,
-        text: "on it — recruiting real human editors to review your cut 🧑‍🎨 feedback lands here",
+        text: "🧑‍🎨 requesting professional expertise on your content — recruiting verified human editors now",
       });
+      terac
+        .launchReview({ videoPath: session.lastVideoPath, chatId })
+        .then((opp) =>
+          sendToMessaging({
+            chatId,
+            text: `pros are lined up ✅ they're watching your cut as we speak — feedback lands right here`,
+          }),
+        )
+        .catch((err) => {
+          console.error("[terac] launch failed:", err.message);
+          sendToMessaging({ chatId, text: "expert panel is warming up — feedback coming shortly 🧑‍🎨" });
+        });
+      return;
     }
 
     case "edit": {
@@ -305,6 +336,7 @@ app.post("/uploaded", async (req, res) => {
   const session = (sessions[chatId] ??= { history: [] });
   session.clipsUploaded = true;
   res.json({ ok: true });
+  saveSessions();
   if (session.editing) {
     return sendToMessaging({ chatId, text: "already cutting — hang tight, video's coming ✂️" });
   }

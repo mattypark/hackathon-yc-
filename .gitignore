@@ -25,3 +25,4 @@ feedback/
 
 # terac project cache (machine-local)
 agent/terac-project.json
+sessions.json
