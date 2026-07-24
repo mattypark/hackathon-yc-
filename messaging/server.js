@@ -85,7 +85,8 @@ const upload = multer({
     cb(null, /\.(mp4|mov|m4v)$/i.test(file.originalname)),
 });
 
-app.get("/upload", (_req, res) => {
+app.get("/upload", (req, res) => {
+  const chat = typeof req.query.chat === "string" ? req.query.chat : "";
   res.type("html").send(`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>jptr — drop your clips</title>
@@ -103,13 +104,15 @@ app.get("/upload", (_req, res) => {
   <div id="status"></div>
 </div>
 <script>
+const chat=${JSON.stringify(chat)};
 const zone=document.getElementById('zone'),status=document.getElementById('status');
 async function send(files){
   const fd=new FormData();[...files].forEach(f=>fd.append('clips',f));
+  if(chat) fd.append('chatId',chat);
   status.textContent='uploading '+files.length+' file(s)…';
   const r=await fetch('/upload',{method:'POST',body:fd});
   const j=await r.json();
-  status.textContent=j.ok?j.count+' clip(s) ready ✅ — text the agent to start':'upload failed';
+  status.textContent=j.ok?j.count+' clip(s) ready ✅ — back to iMessage':'upload failed';
 }
 zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('over')});
 zone.addEventListener('dragleave',()=>zone.classList.remove('over'));
@@ -118,9 +121,19 @@ document.getElementById('f').addEventListener('change',e=>send(e.target.files));
 </script>`);
 });
 
-app.post("/upload", upload.array("clips"), (req, res) => {
-  console.log("[upload]", (req.files || []).map((f) => f.filename));
-  res.json({ ok: true, count: (req.files || []).length });
+app.post("/upload", upload.array("clips"), async (req, res) => {
+  const count = (req.files || []).length;
+  const chatId = req.body?.chatId || req.query.chat;
+  console.log("[upload]", (req.files || []).map((f) => f.filename), "chat=", chatId || "(none)");
+  res.json({ ok: true, count });
+  // Tell the agent which chat owns these clips so session-scoped footage works.
+  if (chatId && count > 0) {
+    fetch(AGENT_URL.replace(/\/handle$/, "") + "/uploaded", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chatId, count }),
+    }).catch((err) => console.error("[upload] agent notify failed:", err.message));
+  }
 });
 
 // ---------------------------------------------------------------- 4. /review
