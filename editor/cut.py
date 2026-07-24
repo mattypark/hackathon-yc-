@@ -6,6 +6,7 @@ Pipeline: (optional) Google Drive folder download -> auto-editor cut non-talking
 Usage (per CONTRACT.md):
   python editor/cut.py '{"clipsDir":"./clips","instruction":"cut non-talking","marginSec":0.2}'
   python editor/cut.py '{"clipsDir":"./clips","driveUrl":"https://drive.google.com/drive/folders/XXXX","marginSec":0.2}'
+  python editor/cut.py '{"clipsDir":"./clips","driveFolderId":"1AbC...","marginSec":0.2}'   # service-account (multi-user)
 
 Prints EditResult JSON to stdout:
   {"ok": true, "videoPath": "./output/final.mp4", "durationSec": 42}
@@ -28,8 +29,8 @@ DEFAULT_MARGIN_SEC = 0.2
 AUDIO_THRESHOLD = None  # e.g. "0.04" -> passes --edit audio:threshold=0.04
 
 
-def fail(message: str) -> None:
-    print(json.dumps({"ok": False, "error": message}))
+def fail(message: str, code: str = "ERROR") -> None:
+    print(json.dumps({"ok": False, "error": message, "code": code}))
     sys.exit(1)
 
 
@@ -114,10 +115,19 @@ def main() -> None:
     clips_dir = Path(request.get("clipsDir", "./clips"))
     margin_sec = float(request.get("marginSec", DEFAULT_MARGIN_SEC))
     drive_url = request.get("driveUrl")
+    drive_folder_id = request.get("driveFolderId")
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 
-    if drive_url:
+    if drive_folder_id:
+        # Multi-user path: user shared THEIR folder to our service-account email.
+        try:
+            sys.path.insert(0, str(Path(__file__).parent))
+            from drive_ingest import DriveIngestError, download_folder
+            download_folder(drive_folder_id, clips_dir)
+        except DriveIngestError as err:
+            fail(str(err), code=err.code)  # NOT_SHARED / NO_CREDENTIALS / EMPTY_FOLDER / DOWNLOAD_FAILED
+    elif drive_url:
         download_drive_folder(drive_url, clips_dir)
 
     if not clips_dir.is_dir():

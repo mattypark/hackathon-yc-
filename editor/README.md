@@ -18,7 +18,14 @@ python editor/cut.py '{"clipsDir":"./clips","instruction":"cut non-talking","mar
 
 # pull from Google Drive first (folder must be shared "anyone with link")
 python editor/cut.py '{"clipsDir":"./clips","driveUrl":"https://drive.google.com/drive/folders/XXXX","marginSec":0.2}'
+
+# multi-user: ANY user's folder, shared to our service-account email
+python editor/cut.py '{"clipsDir":"./clips","driveFolderId":"1AbC...","marginSec":0.2}'
 ```
+
+Multi-user error codes (agent turns these into reply texts):
+`NO_CREDENTIALS` · `NOT_SHARED` (→ "share your folder to <SA email> and resend") · `EMPTY_FOLDER` · `DOWNLOAD_FAILED`.
+Get SA email programmatically: `python3 -c "import sys;sys.path.insert(0,'editor');from drive_ingest import service_account_email;print(service_account_email())"`
 
 Output (stdout, per CONTRACT):
 
