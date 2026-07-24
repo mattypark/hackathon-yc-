@@ -57,7 +57,32 @@ def find_clips(clips_dir: Path) -> list[Path]:
     return sorted(p for p in clips_dir.iterdir() if p.suffix.lower() in VIDEO_EXTS)
 
 
+def audio_codec_of(video: Path) -> str:
+    result = run([
+        "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(video),
+    ])
+    return result.stdout.strip()
+
+
+def normalize_audio(clip: Path, index: int) -> Path:
+    """Camera footage often carries PCM audio (pcm_s16be), which breaks
+    auto-editor's mp4 mux (missing moov atom). Remux to AAC, video copied —
+    fast even on multi-GB files."""
+    normalized = OUTPUT_DIR / f"norm_{index}.mp4"
+    result = run([
+        "ffmpeg", "-y", "-i", str(clip),
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(normalized),
+    ])
+    if result.returncode != 0 or not normalized.exists():
+        fail(f"audio normalize failed on {clip.name}: {result.stderr.strip()[:500]}")
+    return normalized
+
+
 def cut_clip(clip: Path, index: int, margin_sec: float) -> Path:
+    if audio_codec_of(clip).startswith("pcm"):
+        clip = normalize_audio(clip, index)
     out = OUTPUT_DIR / f"cut_{index}.mp4"
     cmd = ["auto-editor", str(clip), "--margin", f"{margin_sec}sec", "--no-open", "-o", str(out)]
     if AUDIO_THRESHOLD:
