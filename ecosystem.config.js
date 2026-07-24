@@ -11,7 +11,7 @@ module.exports = {
     },
     {
       name: 'jptr-agent',
-      script: 'agent/orchestrate.js',
+      script: 'agent/server.js', // Siri's orchestrator (Runware LLM + terac client)
       cwd: __dirname,
       autorestart: true,
       max_restarts: 20,
