@@ -1,0 +1,19 @@
+# deps
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# secrets
+.env
+.env.*
+
+# media (demo footage + renders stay local)
+clips/
+output/
+*.mp4
+*.mov
+
+# os / editor
+.DS_Store
+*.log
