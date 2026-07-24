@@ -95,12 +95,16 @@ def download_folder(folder_id: str, dest: Path) -> list[Path]:
             ) from exc
         raise DriveIngestError("DOWNLOAD_FAILED", f"Drive list failed: {exc}") from exc
 
-    videos = [f for f in resp.get("files", []) if f.get("mimeType", "").startswith(VIDEO_MIME_PREFIX)]
+    files = resp.get("files", [])
+    videos = [f for f in files if f.get("mimeType", "").startswith(VIDEO_MIME_PREFIX)]
     if not videos:
         raise DriveIngestError("EMPTY_FOLDER", f"no video files in folder {folder_id}")
+    # also pull music beds + LUTs — cut.py's polish pass auto-uses them
+    extras = [f for f in files
+              if f.get("mimeType", "").startswith("audio/") or f["name"].lower().endswith(".cube")]
 
     downloaded: list[Path] = []
-    for f in videos:
+    for f in videos + extras:
         target = dest / f["name"]
         try:
             request = drive.files().get_media(fileId=f["id"])

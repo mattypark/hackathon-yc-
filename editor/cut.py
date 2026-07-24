@@ -15,6 +15,8 @@ Prints EditResult JSON to stdout:
 Deps: pip install auto-editor gdown   (auto-editor bundles ffmpeg)
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -124,6 +126,52 @@ def concat_clips(cuts: list[Path]) -> Path:
     return final
 
 
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac"}
+
+
+def find_music(clips_dir: Path) -> Path | None:
+    """First audio file in the folder = music bed (user dropped it in Drive/upload)."""
+    tracks = sorted(p for p in clips_dir.iterdir() if p.suffix.lower() in AUDIO_EXTS)
+    return tracks[0] if tracks else None
+
+
+def find_lut(clips_dir: Path) -> Path | None:
+    """First .cube file = color grade LUT."""
+    luts = sorted(clips_dir.glob("*.cube"))
+    return luts[0] if luts else None
+
+
+def apply_polish(video: Path, music: Path | None, lut: Path | None, cinematic: bool) -> Path:
+    """Optional finishing pass: color grade (LUT or built-in cinematic curve)
+    + music bed mixed under the speech at low volume. Single ffmpeg run."""
+    if not music and not lut and not cinematic:
+        return video
+
+    out = OUTPUT_DIR / "polished.mp4"
+    vf = []
+    if lut:
+        vf.append(f"lut3d='{lut.as_posix()}'")
+    elif cinematic:
+        # gentle "auto grade": mild s-curve contrast, warmth, saturation lift
+        vf.append("eq=contrast=1.06:saturation=1.15:gamma=0.98,colorbalance=rm=0.03:bm=-0.03")
+
+    cmd = ["ffmpeg", "-y", "-i", str(video)]
+    if music:
+        cmd += ["-stream_loop", "-1", "-i", str(music), "-filter_complex",
+                (f"[0:v]{','.join(vf)}[v];" if vf else "[0:v]null[v];")
+                + "[1:a]volume=0.15[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=2[a]",
+                "-map", "[v]", "-map", "[a]", "-shortest"]
+    elif vf:
+        cmd += ["-vf", ",".join(vf), "-c:a", "copy"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", str(out)]
+
+    result = run(cmd)
+    if result.returncode != 0 or not out.exists():
+        # polish is garnish — never fail the edit over it
+        return video
+    return out
+
+
 def probe_duration(video: Path) -> float:
     result = run([
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -184,10 +232,19 @@ def main() -> None:
     final = concat_clips(cuts)
     export_premiere_timeline(clips[0], margin_sec)
 
+    # finishing pass: music bed + color grade, driven by what's in the folder
+    music = find_music(clips_dir)
+    lut = find_lut(clips_dir)
+    cinematic = bool(request.get("cinematic"))
+    polished = apply_polish(final, music, lut, cinematic)
+
     print(json.dumps({
         "ok": True,
-        "videoPath": f"./{final.as_posix()}",
-        "durationSec": probe_duration(final),
+        "videoPath": f"./{polished.as_posix()}",
+        "durationSec": probe_duration(polished),
+        "polish": {"music": music.name if music else None,
+                   "lut": lut.name if lut else None,
+                   "cinematic": cinematic},
     }))
 
 
