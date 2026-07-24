@@ -121,7 +121,7 @@ function send(files){
   };
   xhr.onload=()=>{
     try{const j=JSON.parse(xhr.responseText);
-      status.textContent=j.ok?j.count+' file(s) ready ✅ — text the agent to start':'upload failed: '+(j.error||xhr.status);
+      status.textContent=j.ok?j.count+' file(s) ready ✅ — back to iMessage':'upload failed: '+(j.error||xhr.status);
     }catch{status.textContent='upload failed ('+xhr.status+')'}
   };
   xhr.onerror=()=>{status.textContent='network error — big files over the tunnel take a while, retry or use Drive'};
