@@ -17,3 +17,8 @@ output/
 # os / editor
 .DS_Store
 *.log
+
+# credentials + HITL data
+sa-key.json
+*.serviceaccount.json
+feedback/
