@@ -116,9 +116,21 @@ async function runEdit(chatId, editRequest) {
   }
 }
 
+const demo = require("./demo");
+
 app.post("/handle", async (req, res) => {
   const { chatId, text } = req.body || {};
   console.log("webhook →", req.body);
+
+  // Scripted demo: trigger word in the message OR DEMO_MODE=1 forces it for
+  // every edit-looking text. Staged replies -> Premiere screen recording.
+  const wantsEdit = /edit|cut|non.?talking|dead air/i.test(text || "");
+  if (/jptr demo/i.test(text || "") || (process.env.DEMO_MODE === "1" && wantsEdit)) {
+    res.json({ ok: true, demo: true });
+    demo.run(chatId, sendToMessaging).catch(console.error);
+    return;
+  }
+
   const intent = await parseIntent(text || "");
   console.log("intent →", intent);
 
