@@ -25,6 +25,16 @@
     --color-ember: #ff5a00;
     --color-magenta-spark: #fe45e2;
 
+    /* Jeton palette (hero zone) */
+    --color-signal-orange: #f73b20;
+    --color-ink-roast: #360802;
+    --color-ash-grey: #ababab;
+    --color-linen-blush: #fdedea;
+    --color-coral-red: #fb2d54;
+    --color-cobalt-blue: #477ee9;
+    --color-emerald-green: #34c771;
+    --surface-category-tint: rgba(247, 59, 32, 0.05);
+
     --font-cosmica: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
     --page-max-width: 1200px;
@@ -66,9 +76,9 @@
     position: sticky;
     top: 0;
     z-index: 100;
-    background: rgba(244, 244, 245, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
   .nav-inner {
     display: flex;
@@ -77,11 +87,11 @@
     height: 68px;
   }
   .logo {
-    font-weight: 700;
+    font-weight: 500;
     font-size: 20px;
-    color: var(--color-obsidian);
+    color: var(--color-ink-roast);
     text-decoration: none;
-    letter-spacing: -0.02em;
+    letter-spacing: 0.01em;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -90,13 +100,13 @@
     width: 26px;
     height: 26px;
     border-radius: 9px;
-    background: var(--color-obsidian);
+    background: var(--color-signal-orange);
     color: #fff;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 500;
   }
   .nav-links {
     display: flex;
@@ -104,17 +114,38 @@
   }
   .nav-links a {
     font-size: 14px;
-    color: var(--color-graphite);
+    letter-spacing: 0.03em;
+    color: var(--color-ink-roast);
     text-decoration: none;
   }
-  .nav-links a:hover { color: var(--color-obsidian); }
+  .nav-links a:hover { color: var(--color-signal-orange); }
   .nav-actions { display: flex; align-items: center; gap: 12px; }
   .nav-login {
     font-size: 14px;
-    color: var(--color-iron);
+    letter-spacing: 0.03em;
+    color: var(--color-ink-roast);
     text-decoration: none;
     padding: 10px 14px;
   }
+  .btn-orange {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-signal-orange);
+    color: #ffffff;
+    font-family: var(--font-cosmica);
+    font-size: 14px;
+    font-weight: 450;
+    letter-spacing: 0.03em;
+    padding: 10px 18px;
+    border: none;
+    border-radius: 12px;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+  }
+  .btn-orange:hover { background: var(--color-brand-orange-tint, #f84d35); }
   .btn-dark {
     display: inline-flex;
     align-items: center;
@@ -136,56 +167,143 @@
   .btn-dark:hover { transform: translateY(-1px); }
   .nav .btn-dark { border-radius: var(--radius-pills); padding: 10px 18px; }
 
-  /* ============ Hero ============ */
-  .hero { padding: 80px 0; }
-  .hero-grid {
-    display: grid;
-    grid-template-columns: 1.25fr 1fr;
-    gap: 48px;
-    align-items: center;
+  /* ============ Hero (Jeton editorial) ============ */
+  .hero {
+    background: #ffffff;
+    padding: 120px 0 100px;
   }
-  .badge-ember {
+  .hero-eyebrow {
     display: inline-block;
-    background: var(--color-ember);
-    color: #ffffff;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 4px 8px;
-    border-radius: var(--radius-badges);
-    margin-bottom: 20px;
+    font-size: 14px;
+    font-weight: 450;
+    letter-spacing: 0.03em;
+    color: var(--color-signal-orange);
+    background: var(--surface-category-tint);
+    border-radius: 9999px;
+    padding: 8px 16px;
+    margin-bottom: 40px;
   }
   .hero h1 {
-    font-size: 64px;
-    font-weight: 600;
-    line-height: 1.12;
-    color: var(--color-obsidian);
-    letter-spacing: -0.02em;
+    font-size: clamp(56px, 9vw, 116px);
+    font-weight: 500;
+    line-height: 0.95;
+    letter-spacing: 0.01em;
+    color: var(--color-ink-roast);
+    max-width: 1000px;
+    margin-bottom: 48px;
   }
-  .rotator {
-    display: inline-block;
+  .hero h1 .accent { color: var(--color-signal-orange); }
+  .hero-sub {
+    font-size: 23px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    color: var(--color-ink-roast);
+    max-width: 560px;
+    margin-bottom: 40px;
+  }
+  .hero-cta {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .hero-cta .btn-orange { padding: 16px 28px; font-size: 16px; }
+  .link-orange {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-signal-orange);
+    font-size: 16px;
+    font-weight: 450;
+    letter-spacing: 0.03em;
+    text-decoration: none;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .link-orange:hover { background: var(--surface-category-tint); }
+  .hero .capture-note { color: var(--color-ash-grey); }
+  .hero .strip-label { color: var(--color-ash-grey); margin-top: 80px; }
+  .hero .logo-strip span { color: var(--color-ash-grey); opacity: 0.8; }
+
+  /* ============ Big category words (Jeton, sticky scroll) ============ */
+  .bigwords { background: #ffffff; }
+  .bigwords-track {
+    height: 300vh;
     position: relative;
-    color: var(--color-obsidian);
-    border-bottom: 3px solid var(--color-cloud);
-    min-width: 220px;
   }
-  .rotator span {
+  .bigwords-sticky {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .bw-slide {
     position: absolute;
-    left: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    text-align: center;
+    padding: 0 24px;
     opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.35s ease, transform 0.35s ease;
-    white-space: nowrap;
+    transform: translateY(70px) scale(0.96);
+    transition: opacity 0.55s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
+    pointer-events: none;
   }
-  .rotator span.active {
-    position: relative;
+  .bw-slide.active {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
-  .hero-side p {
-    font-size: 15px;
-    color: var(--color-steel);
-    margin-bottom: 24px;
+  .bw-slide.passed {
+    transform: translateY(-70px) scale(0.96);
   }
+  .bw-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .bigwords .word-icon {
+    width: clamp(52px, 7vw, 92px);
+    height: clamp(52px, 7vw, 92px);
+    border-radius: 24%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .bigwords .word-icon svg {
+    width: 52%;
+    height: 52%;
+    stroke: #ffffff;
+    stroke-width: 2.2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .bigwords .word {
+    font-size: clamp(56px, 9vw, 116px);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.01em;
+  }
+  .bigwords .caption {
+    font-size: 18px;
+    font-weight: 450;
+    letter-spacing: 0.03em;
+    color: var(--color-ash-grey);
+  }
+  .bw-slide.row-text .word { color: var(--color-cobalt-blue); }
+  .bw-slide.row-text .word-icon { background: var(--color-cobalt-blue); }
+  .bw-slide.row-cut .word { color: var(--color-emerald-green); }
+  .bw-slide.row-cut .word-icon { background: var(--color-emerald-green); }
+  .bw-slide.row-review .word { color: var(--color-coral-red); }
+  .bw-slide.row-review .word-icon { background: var(--color-coral-red); }
+
   .email-capture {
     display: flex;
     gap: 8px;
@@ -547,20 +665,63 @@
   .footer-links a:hover { color: var(--color-graphite); }
   .footer-note { font-size: 12px; color: var(--color-ash); }
 
+  /* ============ Scroll animations ============ */
+  @keyframes riseIn {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: none; }
+  }
+  .hero .hero-eyebrow { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0s both; }
+  .hero h1 { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.08s both; }
+  .hero .hero-sub { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.18s both; }
+  .hero .hero-cta { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.28s both; }
+  .hero .capture-note { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.36s both; }
+  .hero .strip-label { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.48s both; }
+  .hero .logo-strip { animation: riseIn 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.56s both; }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: none;
+  }
+  .breakthrough .big-bubble {
+    transform: scale(0.92);
+    opacity: 0;
+    transition: transform 0.8s cubic-bezier(0.22, 0.61, 0.36, 1) 0.2s, opacity 0.8s ease 0.2s;
+  }
+  .breakthrough.visible .big-bubble {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero .hero-eyebrow, .hero h1, .hero .hero-sub, .hero .hero-cta,
+    .hero .capture-note, .hero .strip-label, .hero .logo-strip { animation: none; }
+    .reveal, .breakthrough .big-bubble {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+    .bw-slide { transition: none; }
+  }
+
   /* ============ Responsive ============ */
   @media (max-width: 960px) {
-    .hero h1 { font-size: 48px; }
-    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .hero { padding: 80px 0 64px; }
     .card-grid { grid-template-columns: repeat(2, 1fr); }
     .dark-block { grid-template-columns: 1fr; padding: 32px; }
     .steps-grid, .quote-grid { grid-template-columns: 1fr; }
     .stats-row { flex-direction: column; }
+    .bw-row { gap: 16px; }
+    .bigwords .caption { font-size: 15px; }
   }
   @media (max-width: 560px) {
-    .hero h1 { font-size: 38px; }
-    .rotator { min-width: 150px; }
     .card-grid { grid-template-columns: 1fr; }
     .nav-links { display: none; }
+    .capture-jeton { flex-direction: column; }
   }
 </style>
 </head>
@@ -578,35 +739,22 @@
     </nav>
     <div class="nav-actions">
       <a class="nav-login" href="#">Log in</a>
-      <a class="btn-dark" href="#get-started">Get your number</a>
+      <a class="btn-orange js-sms" href="#get-started">Text jptr</a>
     </div>
   </div>
 </header>
 
-<!-- Hero -->
+<!-- Hero (Jeton editorial) -->
 <section class="hero" id="get-started">
-  <div class="container hero-grid">
-    <div>
-      <span class="badge-ember">YC-style hackathon build</span>
-      <h1>Your video editor is now just a
-        <span class="rotator" id="rotator">
-          <span class="active">text away.</span>
-          <span>rough cut.</span>
-          <span>reply.</span>
-          <span>thread.</span>
-        </span>
-      </h1>
-    </div>
-    <div class="hero-side">
-      <p>iMessage is already the easiest way you communicate — so that's where your editor lives. Text jptr your clips, describe the cut you want, and the finished video lands back in the same thread. Reviewed by real human editors. No apps, no timelines, no uploads.</p>
-      <form class="email-capture" onsubmit="event.preventDefault(); this.querySelector('input').value=''; alert('You\'re on the list — we\'ll text you.');">
-        <input type="email" placeholder="Enter your email" required />
-        <button class="btn-dark" type="submit">Get early access</button>
-      </form>
-      <p class="capture-note">We'll text you a number to start your first edit. Free during beta.</p>
-    </div>
-  </div>
   <div class="container">
+    <span class="hero-eyebrow">Video editing over iMessage</span>
+    <h1>The easiest way to edit video is <span class="accent">a text.</span></h1>
+    <p class="hero-sub">Text jptr your clips and what you want. The finished cut lands back in the same thread — reviewed by real human editors.</p>
+    <div class="hero-cta">
+      <a class="btn-orange js-sms" href="#get-started">Text jptr now</a>
+      <a class="link-orange" href="https://unpieced-christy-unconspiringly.ngrok-free.dev/upload" target="_blank" rel="noopener">Drop your clips <span>→</span></a>
+    </div>
+    <p class="capture-note">Opens your Messages app. No download, no signup — just say hi.</p>
     <p class="strip-label">Powered by the stack behind the scenes</p>
     <div class="logo-strip">
       <span>iMessage</span>
@@ -614,6 +762,35 @@
       <span>Google Drive</span>
       <span>Linq</span>
       <span>Terac</span>
+    </div>
+  </div>
+</section>
+
+<!-- Big category words (Jeton, sticky scroll) -->
+<section class="bigwords">
+  <div class="bigwords-track" id="bigwords-track">
+    <div class="bigwords-sticky">
+      <div class="bw-slide row-text active">
+        <div class="bw-row">
+          <span class="word-icon"><svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>
+          <span class="word">Text</span>
+        </div>
+        <p class="caption">Say what you want in plain English</p>
+      </div>
+      <div class="bw-slide row-cut">
+        <div class="bw-row">
+          <span class="word-icon"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg></span>
+          <span class="word">Cut</span>
+        </div>
+        <p class="caption">The agent pulls your clips and edits them automatically</p>
+      </div>
+      <div class="bw-slide row-review">
+        <div class="bw-row">
+          <span class="word-icon"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
+          <span class="word">Review</span>
+        </div>
+        <p class="caption">Real human editors rate every cut before you post</p>
+      </div>
     </div>
   </div>
 </section>
@@ -831,15 +1008,60 @@
 </footer>
 
 <script>
+  // ==== CONFIG: set this to the provisioned Linq number (LINQ_FROM_NUMBER in messaging/.env) ====
+  const JPTR_NUMBER = "+12055030508";
+  const SMS_BODY = "hey jptr, I have some clips to cut";
+
+  // Wire every "Text jptr" button to open the Messages app
+  document.querySelectorAll(".js-sms").forEach(function (a) {
+    a.href = "sms:" + JPTR_NUMBER + "&body=" + encodeURIComponent(SMS_BODY);
+  });
+
+  // Scroll-reveal animations
   (function () {
-    const rotator = document.getElementById('rotator');
-    const words = rotator.querySelectorAll('span');
-    let i = 0;
-    setInterval(function () {
-      words[i].classList.remove('active');
-      i = (i + 1) % words.length;
-      words[i].classList.add('active');
-    }, 2400);
+    // Tag elements that should fade up when scrolled into view
+    document.querySelectorAll(
+      ".section-head, .cat-card, .dark-block, .step-card, .stats-row .stat, .breakthrough, .quote-card, .final-cta"
+    ).forEach(function (el) { el.classList.add("reveal"); });
+
+    // Stagger children inside grids
+    [".card-grid", ".steps-grid", ".quote-grid", ".stats-row"].forEach(function (sel) {
+      document.querySelectorAll(sel).forEach(function (grid) {
+        Array.prototype.forEach.call(grid.children, function (child, i) {
+          child.style.transitionDelay = (i * 90) + "ms";
+        });
+      });
+    });
+
+    const targets = document.querySelectorAll(".reveal");
+    const observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: "0px 0px -40px 0px" });
+    targets.forEach(function (el) { observer.observe(el); });
+  })();
+
+  // Sticky scroll for Text / Cut / Review — one screen per word
+  (function () {
+    const track = document.getElementById("bigwords-track");
+    const slides = track.querySelectorAll(".bw-slide");
+    function update() {
+      const rect = track.getBoundingClientRect();
+      const scrollable = rect.height - window.innerHeight;
+      const progress = Math.min(Math.max(-rect.top / scrollable, 0), 0.999);
+      const idx = Math.floor(progress * slides.length);
+      slides.forEach(function (slide, i) {
+        slide.classList.toggle("active", i === idx);
+        slide.classList.toggle("passed", i < idx);
+      });
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    update();
   })();
 </script>
 
