@@ -178,6 +178,19 @@ async function runEdit(chatId, session, intent) {
     videoPath: result.videoPath,
     caption: `done — cut it down to ${result.durationSec}s 🎬 want real human editors to rate it? just say "get feedback"`,
   });
+  showInPremiere();
+}
+
+// Surface the cut in Premiere Pro (MCP Bridge panel must be Running).
+// Non-fatal — demo garnish, never blocks the reply.
+function showInPremiere() {
+  const send = path.join(ROOT, "premiere", "send-jsx.sh");
+  execFile(send, [path.join(ROOT, "premiere", "import-cut.jsx")], { cwd: ROOT }, (err) => {
+    if (err) return console.log("[premiere] import skipped:", err.message);
+    execFile(send, [path.join(ROOT, "premiere", "open-cut.jsx")], { cwd: ROOT }, (err2, stdout) => {
+      console.log("[premiere]", err2 ? `open skipped: ${err2.message}` : String(stdout).trim());
+    });
+  });
 }
 
 // -------------------------------------------------------------------- routes
