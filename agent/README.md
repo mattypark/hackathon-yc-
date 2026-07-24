@@ -55,8 +55,9 @@ curl -X POST localhost:4000/mock/feedback/<localId from agent logs>
 ## Things to know / booth-confirm at Terac
 
 - Real API verified from live docs: base `https://terac.com/api/external/v2`, `Authorization: Bearer`, 100 req/min, `POST /opportunities` + `POST /opportunities/{id}/launch`, `GET /opportunities/{id}/submissions?status=approved`.
-- **`task_type: "survey"` is unconfirmed** (docs example only shows `"interview"`). If create 4xxs, set `TERAC_TASK_TYPE=interview` in `.env`.
+- **`task_type` verified live (2026-07-24)**: valid enums are `interview | file_upload | activity` — we use `activity` (`"survey"` does not exist). A real draft create+delete round-trip succeeded against the API; pricing is **$7.50/participant → $22.50 for 3** (fits the $250 credit).
+- **Terac appends `?submissionId={submissionId}&taskId={taskId}` to our `task_url`** — Person 1's review page should store `submissionId` as the participant identifier in the feedback JSON.
 - `expected_days_to_complete` minimum is **5 days** → human responses take hours/days. Launch the real opportunity 1–2h before judging; keep a pre-collected run as backup.
-- No `filters` sent yet — screening question only; add `job_function` values after enumerating `GET /filters/.../options` at the booth.
+- `job_function` filter now sent (confirmed live option ids): `art-creative, design, marketing, production, writing-editing, advertising` — override via `TERAC_JOB_FUNCTIONS`. Screening question ("edit/post short-form video weekly?") still applies on top.
 - Substantive feedback comes from OUR review page file, not Terac submissions (those only carry screening answers/status).
 - Premiere garnish: skipped (non-critical); manual `timeline.xml` import into Premiere is the backup wow shot.

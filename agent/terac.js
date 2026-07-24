@@ -104,7 +104,8 @@ async function launchReview({ videoPath, chatId }) {
         }],
         tasks: [{
           sequence: 1,
-          task_type: process.env.TERAC_TASK_TYPE || "survey",
+          // verified live 2026-07-24: valid enums are interview | file_upload | activity
+          task_type: process.env.TERAC_TASK_TYPE || "activity",
           review_type: process.env.TERAC_REVIEW_TYPE || "auto_approve",
           task_url: taskUrl,
           duration_minutes: 4,
