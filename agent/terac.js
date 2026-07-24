@@ -26,6 +26,8 @@ const readJson = (f, dflt) => {
 };
 
 async function ensureProject() {
+  // set TERAC_PROJECT_ID to launch into an existing dashboard project instead of making a new one
+  if (process.env.TERAC_PROJECT_ID) return console.log("[terac] project (env)", process.env.TERAC_PROJECT_ID), process.env.TERAC_PROJECT_ID;
   const cached = readJson(PROJECT_CACHE, null);
   if (cached && cached.id) return console.log("[terac] project (cached)", cached.id), cached.id;
   const out = await terac("/projects", { method: "POST", body: JSON.stringify({ name: "jptr edit review" }) });

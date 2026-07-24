@@ -22,3 +22,6 @@ output/
 sa-key.json
 *.serviceaccount.json
 feedback/
+
+# terac project cache (machine-local)
+agent/terac-project.json
