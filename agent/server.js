@@ -61,20 +61,19 @@ function extractFolderId(text) {
   return m ? m[1] : null;
 }
 
-function clipsPresent() {
-  try {
-    return fs.readdirSync(CLIPS_DIR).some((f) => VIDEO_EXTS.has(path.extname(f).toLowerCase()));
-  } catch {
-    return false;
-  }
+// Footage is session-scoped: only a Drive link THIS chat sent, or clips THIS
+// chat uploaded, count. Stale files in clips/ never trigger an edit.
+function hasFootage(session) {
+  return Boolean(session.driveFolderId || session.clipsUploaded);
 }
 
-function uploadHint() {
-  return PUBLIC_URL ? `${PUBLIC_URL}/upload` : "the upload page (ask us for the link)";
+function uploadHint(chatId) {
+  if (!PUBLIC_URL) return "the upload page (ask us for the link)";
+  return `${PUBLIC_URL}/upload${chatId ? `?chat=${encodeURIComponent(chatId)}` : ""}`;
 }
 
 // No-LLM fallback: keyword routing + canned replies keeps the thread alive.
-function keywordIntent(text, footageAvailable) {
+function keywordIntent(text, footageAvailable, chatId) {
   const t = (text || "").toLowerCase();
   if (/\b(status|progress|done yet|how'?s it going)\b/.test(t)) return { action: "status", reply: "" };
   if (/\b(review|feedback|human editors?)\b/.test(t)) return { action: "review", reply: "" };
@@ -84,7 +83,7 @@ function keywordIntent(text, footageAvailable) {
       marginSec: 0.2,
       reply: footageAvailable
         ? "on it 🎬 — pulling your clips and cutting the dead air. finished video lands here."
-        : `love it — where's the footage? text me your Google Drive folder link (shared "anyone with link"), or drop the files here: ${uploadHint()}`,
+        : `love it — where's the footage? text me your Google Drive folder link (shared "anyone with link"), or drop the files here: ${uploadHint(chatId)}`,
     };
   }
   return {
@@ -93,20 +92,20 @@ function keywordIntent(text, footageAvailable) {
   };
 }
 
-async function parseIntent(text, session) {
-  const footageAvailable = Boolean(session.driveFolderId) || clipsPresent();
+async function parseIntent(text, session, chatId) {
+  const footageAvailable = hasFootage(session);
   try {
     const raw = await llm.complete({
       system: SYSTEM,
       history: session.history.slice(-10),
-      user: `CONTEXT: footage ${footageAvailable ? "IS" : "is NOT"} available. upload page: ${uploadHint()}\n\n${text}`,
+      user: `CONTEXT: footage ${footageAvailable ? "IS" : "is NOT"} available. upload page: ${uploadHint(chatId)}\n\n${text}`,
     });
     const intent = JSON.parse(raw.replace(/```(json)?/g, "").trim());
-    if (!intent.action || !intent.reply) return keywordIntent(text, footageAvailable);
+    if (!intent.action || !intent.reply) return keywordIntent(text, footageAvailable, chatId);
     return intent;
   } catch (e) {
     console.log("intent parse failed, using keyword fallback:", e.message);
-    return keywordIntent(text, footageAvailable);
+    return keywordIntent(text, footageAvailable, chatId);
   }
 }
 
@@ -160,25 +159,34 @@ async function runEdit(chatId, session, intent) {
   const editRequest = { clipsDir: "./clips", marginSec: intent.marginSec ?? 0.2 };
   if (intent.audioThreshold) editRequest.audioThreshold = intent.audioThreshold;
   if (session.driveFolderId) {
+    // Fresh per-chat dir for Drive pulls — stale files never join the cut.
+    const driveDir = `./clips/drive-${chatId.slice(0, 8)}`;
+    fs.rmSync(path.join(ROOT, driveDir), { recursive: true, force: true });
+    editRequest.clipsDir = driveDir;
     // public-link path (gdown) — zero-setup; SA path kicks in when sa-key.json exists
     editRequest.driveUrl = `https://drive.google.com/drive/folders/${session.driveFolderId}`;
   }
   console.log("edit →", editRequest);
-  const result = await runEditor(editRequest);
-  if (!result.ok) {
-    console.error("edit failed", result);
-    const reply =
-      ERROR_REPLIES[result.code]?.() ??
-      `hit a snag mid-edit (${String(result.error || "unknown").slice(0, 120)}) — try me again?`;
-    return sendToMessaging({ chatId, text: reply });
+  session.editing = true;
+  try {
+    const result = await runEditor(editRequest);
+    if (!result.ok) {
+      console.error("edit failed", result);
+      const reply =
+        ERROR_REPLIES[result.code]?.() ??
+        `hit a snag mid-edit (${String(result.error || "unknown").slice(0, 120)}) — try me again?`;
+      return sendToMessaging({ chatId, text: reply });
+    }
+    session.lastVideoPath = result.videoPath;
+    await sendToMessaging({
+      chatId,
+      videoPath: result.videoPath,
+      caption: `done — cut it down to ${result.durationSec}s 🎬 want real human editors to rate it? just say "get feedback"`,
+    });
+    showInPremiere();
+  } finally {
+    session.editing = false;
   }
-  session.lastVideoPath = result.videoPath;
-  await sendToMessaging({
-    chatId,
-    videoPath: result.videoPath,
-    caption: `done — cut it down to ${result.durationSec}s 🎬 want real human editors to rate it? just say "get feedback"`,
-  });
-  showInPremiere();
 }
 
 // Surface the cut in Premiere Pro (MCP Bridge panel must be Running).
@@ -218,16 +226,19 @@ app.post("/handle", async (req, res) => {
   const folderId = extractFolderId(text);
   if (folderId) session.driveFolderId = folderId;
 
-  const intent = await parseIntent(text || "", session);
+  const intent = await parseIntent(text || "", session, chatId);
   console.log("intent →", intent);
   session.history.push({ role: "user", content: text || "" });
   session.history.push({ role: "assistant", content: intent.reply || intent.action });
   if (session.history.length > 20) session.history.splice(0, session.history.length - 20);
 
-  const footageAvailable = Boolean(session.driveFolderId) || clipsPresent();
+  const footageAvailable = hasFootage(session);
 
   // A fresh Drive link while an edit was waiting = green light, whatever the intent.
   if (folderId && session.pendingEdit) {
+    if (session.editing) {
+      return sendToMessaging({ chatId, text: "already cutting — hang tight, video's coming ✂️" });
+    }
     const pending = session.pendingEdit;
     session.pendingEdit = null;
     await sendToMessaging({ chatId, text: "got the folder 📂 — on it, cutting the dead air now ✂️" });
@@ -238,7 +249,11 @@ app.post("/handle", async (req, res) => {
     case "status":
       return sendToMessaging({
         chatId,
-        text: session.lastVideoPath ? "your cut's done — sent it above ☝️" : "still working on it 🎬",
+        text: session.editing
+          ? "still cutting your video ✂️ — almost there"
+          : session.lastVideoPath
+            ? "your cut's done — sent it above ☝️"
+            : "nothing cooking yet — send me a Drive link or clips and say the word 🎬",
       });
 
     case "review": {
@@ -253,6 +268,9 @@ app.post("/handle", async (req, res) => {
     }
 
     case "edit": {
+      if (session.editing) {
+        return sendToMessaging({ chatId, text: "already cutting — hang tight, video's coming ✂️" });
+      }
       if (!footageAvailable) {
         session.pendingEdit = { marginSec: intent.marginSec ?? 0.2, audioThreshold: intent.audioThreshold };
         return sendToMessaging({ chatId, text: intent.reply });
@@ -264,6 +282,31 @@ app.post("/handle", async (req, res) => {
     default:
       return sendToMessaging({ chatId, text: intent.reply });
   }
+});
+
+// Messaging calls this after a chat-scoped drag-drop upload.
+app.post("/uploaded", async (req, res) => {
+  const { chatId, count } = req.body || {};
+  if (!chatId) return res.status(400).json({ ok: false, error: "chatId required" });
+  const session = (sessions[chatId] ??= { history: [] });
+  session.clipsUploaded = true;
+  res.json({ ok: true });
+  if (session.editing) {
+    return sendToMessaging({ chatId, text: "already cutting — hang tight, video's coming ✂️" });
+  }
+  if (session.pendingEdit) {
+    const pending = session.pendingEdit;
+    session.pendingEdit = null;
+    await sendToMessaging({
+      chatId,
+      text: `got ${count || "your"} clip(s) 📂 — on it, cutting the dead air now ✂️`,
+    });
+    return runEdit(chatId, session, pending);
+  }
+  return sendToMessaging({
+    chatId,
+    text: `got ${count || "your"} clip(s) ✅ — say the word and i'll cut the dead air`,
+  });
 });
 
 app.post("/terac/launch", async (req, res) => {
